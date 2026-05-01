@@ -1,4 +1,6 @@
+import Constants from 'expo-constants';
 import { fetch } from 'expo/fetch';
+import { Platform } from 'react-native';
 
 export type ToolStatus = 'pending' | 'running' | 'completed' | 'error';
 
@@ -51,13 +53,74 @@ export type SandboxLogs = {
   message?: string;
 };
 
+function withoutTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, '');
+}
+
+function defaultProtocolForHost(value: string): 'http:' | 'https:' {
+  const host = value.split('/')[0]?.split(':')[0]?.toLowerCase();
+  if (host && /(^|\.)((expo|exp)\.(dev|io|host|direct|test))$/.test(host)) {
+    return 'https:';
+  }
+
+  return 'http:';
+}
+
+function nativeDevServerOrigin(): string | null {
+  const hostUri = Constants.expoConfig?.hostUri ?? Constants.linkingUri;
+  if (!hostUri) return null;
+
+  let value = hostUri.trim();
+  let protocol: 'http:' | 'https:' | null = null;
+
+  const schemeMatch = value.match(/^([a-z][a-z0-9+.-]*):\/\//i);
+  if (schemeMatch) {
+    const scheme = schemeMatch[1].toLowerCase();
+    protocol = scheme === 'https' || scheme === 'exps' ? 'https:' : 'http:';
+    value = value.slice(schemeMatch[0].length);
+  }
+
+  value = value.replace(/\/--(?:\/.*)?$/, '').replace(/[?#].*$/, '');
+  if (!value) return null;
+
+  const url = new URL(`${protocol ?? defaultProtocolForHost(value)}//${value}`);
+  if (Platform.OS === 'android' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1')) {
+    url.hostname = '10.0.2.2';
+  }
+
+  return url.origin;
+}
+
+function apiUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) return path;
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const configuredOrigin = process.env.EXPO_PUBLIC_API_ORIGIN;
+
+  if (configuredOrigin) {
+    return `${withoutTrailingSlash(configuredOrigin)}${normalizedPath}`;
+  }
+
+  if (Platform.OS === 'web') {
+    return normalizedPath;
+  }
+
+  const origin = nativeDevServerOrigin();
+  if (!origin) {
+    throw new Error(
+      'Unable to determine the Expo API server URL. Set EXPO_PUBLIC_API_ORIGIN for native builds.'
+    );
+  }
+
+  return `${origin}${normalizedPath}`;
+}
+
 export async function streamBuild(opts: {
   prompt: string;
   sessionId?: string;
   signal?: AbortSignal;
   onEvent: (event: BuildEvent) => void;
 }): Promise<void> {
-  const res = await fetch('/api/build', {
+  const res = await fetch(apiUrl('/api/build'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt: opts.prompt, sessionId: opts.sessionId }),
@@ -113,7 +176,7 @@ export async function streamBuild(opts: {
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {
-  await fetch(`/api/session/${encodeURIComponent(sessionId)}`, {
+  await fetch(apiUrl(`/api/session/${encodeURIComponent(sessionId)}`), {
     method: 'DELETE',
   }).catch(() => {});
 }
@@ -123,7 +186,7 @@ export async function listSessionFiles(
   path = '/home/user/app'
 ): Promise<SandboxFileList> {
   const params = new URLSearchParams({ path });
-  const res = await fetch(`/api/session/${encodeURIComponent(sessionId)}?${params}`);
+  const res = await fetch(apiUrl(`/api/session/${encodeURIComponent(sessionId)}?${params}`));
 
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
@@ -144,7 +207,7 @@ export async function readSessionFile(
   path: string
 ): Promise<SandboxFileContent> {
   const params = new URLSearchParams({ mode: 'file', path, readPath: path });
-  const res = await fetch(`/api/session/${encodeURIComponent(sessionId)}?${params}`);
+  const res = await fetch(apiUrl(`/api/session/${encodeURIComponent(sessionId)}?${params}`));
 
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
@@ -167,7 +230,7 @@ export async function readSessionFile(
 
 export async function readSessionLogs(sessionId: string, lines = 300): Promise<SandboxLogs> {
   const params = new URLSearchParams({ logs: 'expo', lines: String(lines) });
-  const res = await fetch(`/api/session/${encodeURIComponent(sessionId)}?${params}`);
+  const res = await fetch(apiUrl(`/api/session/${encodeURIComponent(sessionId)}?${params}`));
 
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
