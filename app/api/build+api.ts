@@ -111,45 +111,28 @@ export async function POST(request: Request) {
         input: Record<string, unknown> | undefined,
         title: string | undefined,
       ): string => {
-        const i = input ?? {};
         const trim = (s: unknown, n = 80) => {
           const str = String(s ?? '').replace(/\s+/g, ' ').trim();
           return str.length > n ? str.slice(0, n - 1) + '…' : str;
         };
-        const basename = (p: unknown) =>
-          String(p ?? '').split('/').pop() ?? String(p ?? '');
 
-        switch (tool) {
-          case 'read':
-          case 'write':
-          case 'edit':
-            return `${tool} ${title?.trim() || basename(i.filePath)}`;
-          case 'glob':
-          case 'grep':
-            return `${tool} ${trim(i.pattern)}`;
-          case 'bash':
-            return `bash $ ${trim(i.command)}`;
-          case 'webfetch':
-            return `webfetch ${trim(i.url)}`;
-          case 'websearch':
-            return `websearch ${trim(i.query)}`;
-          case 'task':
-            return `task ${trim(i.agent ?? i.description ?? '')}`;
-          case 'todowrite':
-            return 'todowrite';
-          case 'skill':
-            return `skill ${trim(i.id)}`;
-          case 'apply_patch': {
-            // Title is "Success. Updated the following files:\nA path/to/file\nM other"
-            const lines = (title ?? '')
-              .split('\n')
-              .map((l) => l.trim())
-              .filter((l) => /^[AMD]\s+\S/.test(l));
-            return lines.length ? `apply_patch ${lines.join(', ')}` : 'apply_patch';
-          }
-          default:
-            return title?.trim() || tool;
-        }
+        const firstTitleLine = title
+          ?.split('\n')
+          .map((line) => line.trim())
+          .find(Boolean);
+
+        if (firstTitleLine) return firstTitleLine;
+
+        const hint =
+          input?.filePath ??
+          input?.pattern ??
+          input?.command ??
+          input?.url ??
+          input?.query ??
+          input?.description ??
+          input?.id;
+
+        return hint ? `${tool} ${trim(hint)}` : tool;
       };
 
       let stdoutBuffer = '';
