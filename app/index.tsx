@@ -8,6 +8,8 @@ import {
   ScrollView,
   StyleSheet,
   TextInput,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -24,11 +26,19 @@ type Message = {
   id: string;
   role: 'user' | 'assistant' | 'system';
   text: string;
+  statusKind?: 'thinking' | 'tool' | 'file';
   error?: boolean;
+};
+
+type WebScrollHandle = {
+  getScrollableNode?: () => WebScrollHandle | null;
+  scrollHeight?: number;
+  scrollTop?: number;
 };
 
 let msgCounter = 0;
 const newMsgId = (suffix: string) => `${Date.now()}-${++msgCounter}-${suffix}`;
+const STICK_TO_BOTTOM_DISTANCE = 60;
 
 const SUGGESTIONS = [
   'A landing page for a SaaS product',
@@ -53,6 +63,8 @@ export default function HomeScreen() {
   const sessionIdRef = useRef<string | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+  const webScrollFrameRef = useRef<number | null>(null);
+  const stickToBottomRef = useRef(true);
 
   const hasMessages = messages.length > 0;
   const canSend = input.trim().length > 0 && !inFlight;
@@ -60,8 +72,42 @@ export default function HomeScreen() {
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
+      if (webScrollFrameRef.current != null) {
+        cancelAnimationFrame(webScrollFrameRef.current);
+      }
     };
   }, []);
+
+  const scrollToBottom = useCallback((animated = true) => {
+    if (Platform.OS !== 'web') {
+      scrollRef.current?.scrollToEnd({ animated });
+      return;
+    }
+
+    if (webScrollFrameRef.current != null) {
+      cancelAnimationFrame(webScrollFrameRef.current);
+    }
+
+    webScrollFrameRef.current = requestAnimationFrame(() => {
+      webScrollFrameRef.current = null;
+
+      const handle = scrollRef.current as unknown as WebScrollHandle | null;
+      const node = handle?.getScrollableNode?.() ?? handle;
+
+      if (node && typeof node.scrollHeight === 'number') {
+        node.scrollTop = node.scrollHeight;
+        return;
+      }
+
+      scrollRef.current?.scrollToEnd({ animated: false });
+    });
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS === 'web' && hasMessages && stickToBottomRef.current) {
+      scrollToBottom(false);
+    }
+  }, [hasMessages, messages, scrollToBottom]);
 
   const appendMessage = useCallback((msg: Message) => {
     setMessages((prev) => [...prev, msg]);
@@ -85,6 +131,7 @@ export default function HomeScreen() {
       const trimmed = text.trim();
       if (!trimmed || inFlight) return;
 
+      stickToBottomRef.current = true;
       appendMessage({ id: newMsgId('u'), role: 'user', text: trimmed });
       setInput('');
       setInFlight(true);
@@ -114,7 +161,8 @@ export default function HomeScreen() {
                 upsertMessage({
                   id: `part-${event.id}`,
                   role: 'system',
-                  text: `Thinking: ${event.text}`,
+                  statusKind: 'thinking',
+                  text: event.text,
                 });
                 break;
               case 'tool': {
@@ -127,15 +175,16 @@ export default function HomeScreen() {
                     label = `${event.title ?? event.name}…`;
                     break;
                   case 'completed':
-                    label = `✓ ${event.title ?? event.name}`;
+                    label = event.title ?? event.name;
                     break;
                   case 'error':
-                    label = `✗ ${event.name}: ${event.error ?? 'failed'}`;
+                    label = `${event.name}: ${event.error ?? 'failed'}`;
                     break;
                 }
                 upsertMessage({
                   id: `part-${event.id}`,
                   role: 'system',
+                  statusKind: 'tool',
                   text: label,
                   error: event.status === 'error',
                 });
@@ -145,6 +194,7 @@ export default function HomeScreen() {
                 upsertMessage({
                   id: `part-${event.id}`,
                   role: 'system',
+                  statusKind: 'file',
                   text: `Attached: ${event.filename ?? event.url ?? 'file'}`,
                 });
                 break;
@@ -155,6 +205,7 @@ export default function HomeScreen() {
                   appendMessage({
                     id: newMsgId('s'),
                     role: 'system',
+                    statusKind: 'tool',
                     text: `opencode exited ${event.exitCode}`,
                     error: true,
                   });
@@ -197,10 +248,26 @@ export default function HomeScreen() {
     setInFlight(false);
     setExpoUrl(null);
     setPreviewReady(false);
+    stickToBottomRef.current = true;
     if (sid) {
       void deleteSession(sid);
     }
   }, []);
+
+  const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    const distanceFromBottom = Math.max(
+      0,
+      contentSize.height - contentOffset.y - layoutMeasurement.height
+    );
+    stickToBottomRef.current = distanceFromBottom < STICK_TO_BOTTOM_DISTANCE;
+  }, []);
+
+  const handleContentSizeChange = useCallback(() => {
+    if (stickToBottomRef.current) {
+      scrollToBottom();
+    }
+  }, [scrollToBottom]);
 
   const subtleBorder = isDark ? '#2a2d30' : '#e6e6e8';
   const mutedText = isDark ? '#9BA1A6' : '#687076';
@@ -209,6 +276,13 @@ export default function HomeScreen() {
   const chipBg = isDark ? '#1f2123' : '#f6f7f9';
   const inputBg = isDark ? '#1f2123' : '#f6f7f9';
   const errorColor = isDark ? '#ff6b6b' : '#c92a2a';
+  const statusAccent = isDark ? '#7dd3fc' : '#0a7ea4';
+  const statusBg = isDark ? '#171b1f' : '#f8fafc';
+  const statusBorder = isDark ? '#2f3842' : '#dce6ee';
+  const statusIconBg = isDark ? '#212830' : '#eaf4f8';
+  const statusErrorBg = isDark ? '#26171a' : '#fff5f5';
+  const statusErrorBorder = isDark ? '#5c262d' : '#ffc9c9';
+  const statusErrorIconBg = isDark ? '#3b2024' : '#ffe3e3';
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: palette.background }]} edges={['top']}>
@@ -239,142 +313,167 @@ export default function HomeScreen() {
 
       <View style={[styles.body, isWide ? styles.bodyRow : styles.bodyColumn]}>
         <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}>
-        {hasMessages ? (
-          <ScrollView
-            ref={scrollRef}
-            style={styles.flex}
-            contentContainerStyle={styles.messagesContent}
-            onContentSizeChange={() =>
-              scrollRef.current?.scrollToEnd({ animated: true })
-            }
-            showsVerticalScrollIndicator={false}>
-            {messages.map((m) => {
-              if (m.role === 'system') {
-                if (m.text.trim().length === 0) return null;
+          style={styles.flex}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}>
+          {hasMessages ? (
+            <ScrollView
+              ref={scrollRef}
+              style={styles.flex}
+              contentContainerStyle={styles.messagesContent}
+              onContentSizeChange={handleContentSizeChange}
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
+              showsVerticalScrollIndicator={false}>
+              {messages.map((m) => {
+                if (m.role === 'system') {
+                  if (m.text.trim().length === 0) return null;
+                  const statusIconName = m.error
+                    ? 'alert-circle-outline'
+                    : m.statusKind === 'thinking'
+                      ? 'sparkles-outline'
+                      : m.statusKind === 'file'
+                        ? 'document-attach-outline'
+                        : 'terminal-outline';
+                  const statusTone = m.error ? errorColor : statusAccent;
+                  const statusTextColor = m.error ? errorColor : mutedText;
+                  return (
+                    <View key={m.id} style={styles.systemRow}>
+                      <View
+                        style={[
+                          styles.systemPill,
+                          {
+                            backgroundColor: m.error ? statusErrorBg : statusBg,
+                            borderColor: m.error ? statusErrorBorder : statusBorder,
+                          },
+                        ]}>
+                        <View
+                          style={[
+                            styles.systemIcon,
+                            { backgroundColor: m.error ? statusErrorIconBg : statusIconBg },
+                          ]}>
+                          <Ionicons name={statusIconName} size={13} color={statusTone} />
+                        </View>
+                        <ThemedText style={[styles.systemText, { color: statusTextColor }]}>
+                          {m.text}
+                        </ThemedText>
+                      </View>
+                    </View>
+                  );
+                }
+
+                const isUser = m.role === 'user';
+                if (!isUser && m.text.length === 0) return null;
                 return (
-                  <View key={m.id} style={styles.systemRow}>
-                    <ThemedText style={[styles.systemText, { color: mutedText }]}>
-                      {m.text}
-                    </ThemedText>
+                  <View
+                    key={m.id}
+                    style={[
+                      styles.bubbleRow,
+                      isUser ? styles.bubbleRowEnd : styles.bubbleRowStart,
+                    ]}>
+                    <View
+                      style={[
+                        styles.bubble,
+                        isUser
+                          ? { backgroundColor: userBubble, borderBottomRightRadius: 4 }
+                          : {
+                              backgroundColor: assistantBubble,
+                              borderBottomLeftRadius: 4,
+                            },
+                      ]}>
+                      <ThemedText
+                        style={[
+                          isUser ? { color: '#fff' } : undefined,
+                          !isUser && m.error ? { color: errorColor } : undefined,
+                          !isUser ? styles.assistantText : undefined,
+                        ]}>
+                        {m.text}
+                      </ThemedText>
+                    </View>
                   </View>
                 );
-              }
+              })}
+            </ScrollView>
+          ) : (
+            <ScrollView
+              contentContainerStyle={styles.heroContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}>
+              <View style={styles.hero}>
+                <ThemedText style={styles.heroTitle}>What do you want to build?</ThemedText>
+                <ThemedText style={[styles.heroSubtitle, { color: mutedText }]}>
+                  Describe an app or screen and we&apos;ll build it inside an E2B sandbox.
+                </ThemedText>
+              </View>
 
-              const isUser = m.role === 'user';
-              if (!isUser && m.text.length === 0) return null;
-              return (
-                <View
-                  key={m.id}
-                  style={[
-                    styles.bubbleRow,
-                    isUser ? styles.bubbleRowEnd : styles.bubbleRowStart,
-                  ]}>
-                  <View
-                    style={[
-                      styles.bubble,
-                      isUser
-                        ? { backgroundColor: userBubble, borderBottomRightRadius: 4 }
-                        : {
-                            backgroundColor: assistantBubble,
-                            borderBottomLeftRadius: 4,
-                          },
+              <View style={styles.suggestions}>
+                {SUGGESTIONS.map((s) => (
+                  <Pressable
+                    key={s}
+                    onPress={() => send(s)}
+                    disabled={inFlight}
+                    style={({ pressed }) => [
+                      styles.chip,
+                      {
+                        backgroundColor: chipBg,
+                        borderColor: subtleBorder,
+                        opacity: pressed || inFlight ? 0.7 : 1,
+                      },
                     ]}>
-                    <ThemedText
-                      style={[
-                        isUser ? { color: '#fff' } : undefined,
-                        !isUser && m.error ? { color: errorColor } : undefined,
-                        !isUser ? styles.assistantText : undefined,
-                      ]}>
-                      {m.text}
-                    </ThemedText>
-                  </View>
-                </View>
-              );
-            })}
-          </ScrollView>
-        ) : (
-          <ScrollView
-            contentContainerStyle={styles.heroContent}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}>
-            <View style={styles.hero}>
-              <ThemedText style={styles.heroTitle}>What do you want to build?</ThemedText>
-              <ThemedText style={[styles.heroSubtitle, { color: mutedText }]}>
-                Describe an app or screen and we&apos;ll build it inside an E2B sandbox.
-              </ThemedText>
-            </View>
+                    <Ionicons name="sparkles-outline" size={14} color={mutedText} />
+                    <ThemedText style={[styles.chipText, { color: palette.text }]}>{s}</ThemedText>
+                  </Pressable>
+                ))}
+              </View>
+            </ScrollView>
+          )}
 
-            <View style={styles.suggestions}>
-              {SUGGESTIONS.map((s) => (
-                <Pressable
-                  key={s}
-                  onPress={() => send(s)}
-                  disabled={inFlight}
-                  style={({ pressed }) => [
-                    styles.chip,
-                    {
-                      backgroundColor: chipBg,
-                      borderColor: subtleBorder,
-                      opacity: pressed || inFlight ? 0.7 : 1,
-                    },
-                  ]}>
-                  <Ionicons name="sparkles-outline" size={14} color={mutedText} />
-                  <ThemedText style={[styles.chipText, { color: palette.text }]}>{s}</ThemedText>
-                </Pressable>
-              ))}
-            </View>
-          </ScrollView>
-        )}
-
-        <View style={[styles.inputWrap, { borderTopColor: subtleBorder }]}>
-          <View
-            style={[
-              styles.inputBar,
-              { backgroundColor: inputBg, borderColor: subtleBorder },
-            ]}>
-            <Pressable hitSlop={8} style={styles.iconBtn} onPress={() => {}}>
-              <Ionicons name="add" size={20} color={mutedText} />
-            </Pressable>
-            <TextInput
-              value={input}
-              onChangeText={setInput}
-              placeholder="Ask Expo Vibe to build something…"
-              placeholderTextColor={mutedText}
-              multiline
-              editable={!inFlight}
-              style={[styles.input, { color: palette.text }]}
-              onSubmitEditing={() => send(input)}
-              blurOnSubmit={false}
-            />
-            <Pressable
-              disabled={!canSend}
-              onPress={() => send(input)}
-              style={({ pressed }) => [
-                styles.sendBtn,
-                {
-                  backgroundColor: canSend ? palette.tint : subtleBorder,
-                  opacity: pressed ? 0.8 : 1,
-                },
+          <View style={[styles.inputWrap, { borderTopColor: subtleBorder }]}>
+            <View
+              style={[
+                styles.inputBar,
+                { backgroundColor: inputBg, borderColor: subtleBorder },
               ]}>
-              {inFlight ? (
-                <ActivityIndicator size="small" color={mutedText} />
-              ) : (
-                <Ionicons
-                  name="arrow-up"
-                  size={18}
-                  color={canSend ? (isDark ? '#151718' : '#fff') : mutedText}
-                />
-              )}
-            </Pressable>
+              <Pressable hitSlop={8} style={styles.iconBtn} onPress={() => {}}>
+                <Ionicons name="add" size={20} color={mutedText} />
+              </Pressable>
+              <TextInput
+                value={input}
+                onChangeText={setInput}
+                placeholder="Ask Expo Vibe to build something…"
+                placeholderTextColor={mutedText}
+                multiline
+                editable={!inFlight}
+                style={[styles.input, { color: palette.text }]}
+                onSubmitEditing={() => send(input)}
+                blurOnSubmit={false}
+              />
+              <Pressable
+                disabled={!canSend}
+                onPress={() => send(input)}
+                style={({ pressed }) => [
+                  styles.sendBtn,
+                  {
+                    backgroundColor: canSend ? palette.tint : subtleBorder,
+                    opacity: pressed ? 0.8 : 1,
+                  },
+                ]}>
+                {inFlight ? (
+                  <ActivityIndicator size="small" color={mutedText} />
+                ) : (
+                  <Ionicons
+                    name="arrow-up"
+                    size={18}
+                    color={canSend ? (isDark ? '#151718' : '#fff') : mutedText}
+                  />
+                )}
+              </Pressable>
+            </View>
+            <ThemedText style={[styles.disclaimer, { color: mutedText }]}>
+              Expo Vibe runs on E2B. Review generated code before shipping.
+            </ThemedText>
           </View>
-          <ThemedText style={[styles.disclaimer, { color: mutedText }]}>
-            Expo Vibe runs on E2B. Review generated code before shipping.
-          </ThemedText>
-        </View>
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
         {previewReady && expoUrl ? (
           <View
             style={[
@@ -391,19 +490,25 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1 },
-  flex: { flex: 1 },
-  body: { flex: 1 },
+  safe: { flex: 1, minHeight: 0, minWidth: 0 },
+  flex: { flex: 1, minHeight: 0, minWidth: 0 },
+  body: { flex: 1, minHeight: 0, minWidth: 0 },
   bodyRow: { flexDirection: 'row' },
   bodyColumn: { flexDirection: 'column' },
   previewPane: {
-    flex: 1,
+    minHeight: 0,
+    minWidth: 0,
     overflow: 'hidden',
   },
   previewPaneWide: {
+    flex: 1,
     borderLeftWidth: StyleSheet.hairlineWidth,
   },
   previewPaneNarrow: {
+    // Narrow layouts (phones) stack chat above preview. Give the preview
+    // less space than the chat so the streamed tool-call history stays
+    // visible without scrolling — chat: flex 1, preview: flex 0.6 ≈ 62/38.
+    flex: 0.6,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   header: {
@@ -494,13 +599,32 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   systemRow: {
+    alignItems: 'flex-start',
+    paddingVertical: 2,
+  },
+  systemPill: {
+    maxWidth: '92%',
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 4,
+    alignSelf: 'flex-start',
+    gap: 8,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  systemIcon: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   systemText: {
+    flexShrink: 1,
     fontSize: 12,
-    fontStyle: 'italic',
-    textAlign: 'center',
+    lineHeight: 16,
+    fontWeight: '500',
   },
   inputWrap: {
     paddingHorizontal: 12,
