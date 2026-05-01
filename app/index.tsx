@@ -145,6 +145,7 @@ export default function HomeScreen() {
   const [previewReloadKey, setPreviewReloadKey] = useState(0);
   const mobileDrawerWidth = Math.min(width * 0.86, MOBILE_DRAWER_MAX_WIDTH);
   const mobileDrawerTranslateX = useRef(new Animated.Value(-MOBILE_DRAWER_MAX_WIDTH)).current;
+  const inputBorderPulse = useRef(new Animated.Value(0)).current;
   const messagesScrollRef = useRef<ScrollView | null>(null);
   const shouldStickToBottomRef = useRef(true);
   const messagesScrollMetricsRef = useRef<MessageScrollMetrics>({
@@ -234,6 +235,35 @@ export default function HomeScreen() {
       setShowScrollToBottom(false);
     }
   }, [hasMessages]);
+
+  useEffect(() => {
+    if (!inFlight) {
+      inputBorderPulse.stopAnimation();
+      inputBorderPulse.setValue(0);
+      return;
+    }
+
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(inputBorderPulse, {
+          toValue: 1,
+          duration: 850,
+          useNativeDriver: false,
+        }),
+        Animated.timing(inputBorderPulse, {
+          toValue: 0,
+          duration: 850,
+          useNativeDriver: false,
+        }),
+      ])
+    );
+
+    animation.start();
+
+    return () => {
+      animation.stop();
+    };
+  }, [inFlight, inputBorderPulse]);
 
   const scrollMessagesToBottom = useCallback((animated = true) => {
     requestAnimationFrame(() => {
@@ -677,6 +707,10 @@ export default function HomeScreen() {
   const statusErrorIconBg = isDark ? '#3b2024' : '#ffe3e3';
   const sessionPaneBg = isDark ? '#151719' : '#fbfcfd';
   const selectedSessionBg = isDark ? '#20262b' : '#eef7fb';
+  const inputBorderColor = inputBorderPulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [subtleBorder, palette.tint],
+  });
 
   const renderSessionPane = (variant: 'desktop' | 'drawer') => (
     <View
@@ -924,10 +958,13 @@ export default function HomeScreen() {
       )}
 
       <View style={[styles.inputWrap, { borderTopColor: subtleBorder }]}>
-        <View
+        <Animated.View
           style={[
             styles.inputBar,
-            { backgroundColor: inputBg, borderColor: subtleBorder },
+            {
+              backgroundColor: inputBg,
+              borderColor: inFlight ? inputBorderColor : subtleBorder,
+            },
           ]}>
           <TextInput
             value={input}
@@ -971,7 +1008,7 @@ export default function HomeScreen() {
               )}
             </Pressable>
           </View>
-        </View>
+        </Animated.View>
         {isWide ? (
           <ThemedText style={[styles.disclaimer, { color: mutedText }]}>
             Expo Vibe runs on E2B. Review generated code before shipping.
