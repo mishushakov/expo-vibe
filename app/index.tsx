@@ -8,8 +8,6 @@ import {
   ScrollView,
   StyleSheet,
   TextInput,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -32,17 +30,10 @@ type Message = {
   error?: boolean;
 };
 
-type WebScrollHandle = {
-  getScrollableNode?: () => WebScrollHandle | null;
-  scrollHeight?: number;
-  scrollTop?: number;
-};
-
 type WorkspaceTab = 'preview' | 'files' | 'logs';
 
 let msgCounter = 0;
 const newMsgId = (suffix: string) => `${Date.now()}-${++msgCounter}-${suffix}`;
-const STICK_TO_BOTTOM_DISTANCE = 60;
 
 const SUGGESTIONS = [
   'A landing page for a SaaS product',
@@ -68,9 +59,6 @@ export default function HomeScreen() {
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>('preview');
   const sessionIdRef = useRef<string | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
-  const scrollRef = useRef<ScrollView>(null);
-  const webScrollFrameRef = useRef<number | null>(null);
-  const stickToBottomRef = useRef(true);
 
   const hasMessages = messages.length > 0;
   const canSend = input.trim().length > 0 && !inFlight;
@@ -78,42 +66,8 @@ export default function HomeScreen() {
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
-      if (webScrollFrameRef.current != null) {
-        cancelAnimationFrame(webScrollFrameRef.current);
-      }
     };
   }, []);
-
-  const scrollToBottom = useCallback((animated = true) => {
-    if (Platform.OS !== 'web') {
-      scrollRef.current?.scrollToEnd({ animated });
-      return;
-    }
-
-    if (webScrollFrameRef.current != null) {
-      cancelAnimationFrame(webScrollFrameRef.current);
-    }
-
-    webScrollFrameRef.current = requestAnimationFrame(() => {
-      webScrollFrameRef.current = null;
-
-      const handle = scrollRef.current as unknown as WebScrollHandle | null;
-      const node = handle?.getScrollableNode?.() ?? handle;
-
-      if (node && typeof node.scrollHeight === 'number') {
-        node.scrollTop = node.scrollHeight;
-        return;
-      }
-
-      scrollRef.current?.scrollToEnd({ animated: false });
-    });
-  }, []);
-
-  useEffect(() => {
-    if (Platform.OS === 'web' && hasMessages && stickToBottomRef.current) {
-      scrollToBottom(false);
-    }
-  }, [hasMessages, messages, scrollToBottom]);
 
   const appendMessage = useCallback((msg: Message) => {
     setMessages((prev) => [...prev, msg]);
@@ -137,7 +91,6 @@ export default function HomeScreen() {
       const trimmed = text.trim();
       if (!trimmed || inFlight) return;
 
-      stickToBottomRef.current = true;
       appendMessage({ id: newMsgId('u'), role: 'user', text: trimmed });
       setInput('');
       setInFlight(true);
@@ -257,26 +210,10 @@ export default function HomeScreen() {
     setExpoUrl(null);
     setPreviewReady(false);
     setActiveWorkspaceTab('preview');
-    stickToBottomRef.current = true;
     if (sid) {
       void deleteSession(sid);
     }
   }, []);
-
-  const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-    const distanceFromBottom = Math.max(
-      0,
-      contentSize.height - contentOffset.y - layoutMeasurement.height
-    );
-    stickToBottomRef.current = distanceFromBottom < STICK_TO_BOTTOM_DISTANCE;
-  }, []);
-
-  const handleContentSizeChange = useCallback(() => {
-    if (stickToBottomRef.current) {
-      scrollToBottom();
-    }
-  }, [scrollToBottom]);
 
   const pasteLogsToChat = useCallback((logs: string) => {
     const trimmedLogs = logs.trim();
@@ -345,12 +282,8 @@ export default function HomeScreen() {
           keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}>
           {hasMessages ? (
             <ScrollView
-              ref={scrollRef}
               style={styles.flex}
               contentContainerStyle={styles.messagesContent}
-              onContentSizeChange={handleContentSizeChange}
-              onScroll={handleScroll}
-              scrollEventThrottle={16}
               showsVerticalScrollIndicator={false}>
               {messages.map((m) => {
                 if (m.role === 'system') {
