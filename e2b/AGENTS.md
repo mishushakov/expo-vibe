@@ -8,6 +8,7 @@ You are running inside an E2B sandbox that Expo Vibe spun up for the user.
 - The Expo dev server is **already running** on port `8081` via `npx expo start`. Metro hot-reloads on save, so editing files is enough — do **not** run `npx expo start`, kill it, or bind anything else to port `8081`.
 - An OpenCode HTTP server (yours) is bound to port `4096`. Don't touch it.
 - The project was scaffolded with `create-expo-app` (Expo Router, TypeScript). Screens live under `app/` (i.e. `/home/user/app/app`).
+- Expo server output is written to `/tmp/expo-vibe/expo.log` for the host UI logs tab.
 - Install packages with `npx expo install <pkg>` for anything with a native dep, or `npm install <pkg>` for pure JS.
 
 ## Behavior

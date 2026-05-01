@@ -23,6 +23,34 @@ export type BuildEvent =
   | { type: 'done'; exitCode: number }
   | { type: 'error'; message: string };
 
+export type SandboxFileEntry = {
+  name: string;
+  path: string;
+  type?: 'file' | 'dir';
+  size: number;
+  modifiedTime?: string;
+};
+
+export type SandboxFileList = {
+  root: string;
+  path: string;
+  entries: SandboxFileEntry[];
+};
+
+export type SandboxFileContent = SandboxFileEntry & {
+  root: string;
+  content: string;
+};
+
+export type SandboxLogs = {
+  path: string;
+  logs: string;
+  updatedAt: string;
+  size?: number;
+  missing?: boolean;
+  message?: string;
+};
+
 export async function streamBuild(opts: {
   prompt: string;
   sessionId?: string;
@@ -88,4 +116,77 @@ export async function deleteSession(sessionId: string): Promise<void> {
   await fetch(`/api/session/${encodeURIComponent(sessionId)}`, {
     method: 'DELETE',
   }).catch(() => {});
+}
+
+export async function listSessionFiles(
+  sessionId: string,
+  path = '/home/user/app'
+): Promise<SandboxFileList> {
+  const params = new URLSearchParams({ path });
+  const res = await fetch(`/api/session/${encodeURIComponent(sessionId)}?${params}`);
+
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`;
+    try {
+      const data = await res.json();
+      if (data?.error) message = data.error;
+    } catch {
+      // not JSON
+    }
+    throw new Error(message);
+  }
+
+  return (await res.json()) as SandboxFileList;
+}
+
+export async function readSessionFile(
+  sessionId: string,
+  path: string
+): Promise<SandboxFileContent> {
+  const params = new URLSearchParams({ mode: 'file', path, readPath: path });
+  const res = await fetch(`/api/session/${encodeURIComponent(sessionId)}?${params}`);
+
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`;
+    try {
+      const data = await res.json();
+      if (data?.error) message = data.error;
+    } catch {
+      // not JSON
+    }
+    throw new Error(message);
+  }
+
+  const data = (await res.json()) as Partial<SandboxFileContent>;
+  if (typeof data.content !== 'string' || !data.path || !data.name) {
+    throw new Error('File preview returned an invalid response');
+  }
+
+  return data as SandboxFileContent;
+}
+
+export async function readSessionLogs(sessionId: string, lines = 300): Promise<SandboxLogs> {
+  const params = new URLSearchParams({ logs: 'expo', lines: String(lines) });
+  const res = await fetch(`/api/session/${encodeURIComponent(sessionId)}?${params}`);
+
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`;
+    try {
+      const data = await res.json();
+      if (data?.error) message = data.error;
+    } catch {
+      // not JSON
+    }
+    throw new Error(message);
+  }
+
+  const data = (await res.json()) as Partial<SandboxLogs>;
+  return {
+    path: data.path ?? '',
+    logs: typeof data.logs === 'string' ? data.logs : '',
+    updatedAt: data.updatedAt ?? new Date().toISOString(),
+    size: data.size,
+    missing: data.missing,
+    message: data.message,
+  };
 }

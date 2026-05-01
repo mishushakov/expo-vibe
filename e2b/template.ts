@@ -12,6 +12,7 @@ export const OPENCODE_PORT = 4096;
 // Expo Metro / dev server. The client preview loads it via
 // https://<sandbox.getHost(EXPO_PORT)>.
 export const EXPO_PORT = 8081;
+export const EXPO_LOG_PATH = '/tmp/expo-vibe/expo.log';
 
 // fromTemplate('opencode') gives us the OpenCode CLI pre-installed. We
 // scaffold the Expo app at build time so fresh sandboxes boot fast, and
@@ -24,12 +25,13 @@ export const EXPO_PORT = 8081;
 // it's preferred over the per-prompt `system` field, which replaces the
 // built-in agent prompt (incl. tool-calling instructions) and hangs.
 export const template = Template()
-  .fromTemplate('opencode')
+  .fromBaseImage()
+  .npmInstall('opencode-ai', { g: true })
   .setWorkdir('/home/user')
   .runCmd(`npx create-expo-app@latest ${APP_DIR} --yes`)
   .copy('AGENTS.md', `${APP_DIR}/AGENTS.md`)
   .setWorkdir(APP_DIR)
   .setStartCmd(
-    `bash -lc 'cd ${APP_DIR} && exec npx expo start --port ${EXPO_PORT}'`,
+    `bash -lc 'mkdir -p /tmp/expo-vibe && : > ${EXPO_LOG_PATH} && cd ${APP_DIR} && npx expo start --port ${EXPO_PORT} 2>&1 | tee -a ${EXPO_LOG_PATH}'`,
     waitForPort(EXPO_PORT)
   );

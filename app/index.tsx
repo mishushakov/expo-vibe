@@ -15,6 +15,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ExpoLogs } from '@/components/expo-logs';
+import { FileExplorer } from '@/components/file-explorer';
 import { SandboxPreview } from '@/components/sandbox-preview';
 import { ThemedText } from '@/components/themed-text';
 import { useThemeMode } from '@/components/theme-context';
@@ -35,6 +37,8 @@ type WebScrollHandle = {
   scrollHeight?: number;
   scrollTop?: number;
 };
+
+type WorkspaceTab = 'preview' | 'files' | 'logs';
 
 let msgCounter = 0;
 const newMsgId = (suffix: string) => `${Date.now()}-${++msgCounter}-${suffix}`;
@@ -58,8 +62,10 @@ export default function HomeScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [inFlight, setInFlight] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [expoUrl, setExpoUrl] = useState<string | null>(null);
   const [previewReady, setPreviewReady] = useState(false);
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>('preview');
   const sessionIdRef = useRef<string | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<ScrollView>(null);
@@ -148,6 +154,7 @@ export default function HomeScreen() {
             switch (event.type) {
               case 'meta':
                 sessionIdRef.current = event.sessionId;
+                setSessionId(event.sessionId);
                 setExpoUrl(event.expoUrl);
                 break;
               case 'text':
@@ -246,8 +253,10 @@ export default function HomeScreen() {
     sessionIdRef.current = undefined;
     setMessages([]);
     setInFlight(false);
+    setSessionId(null);
     setExpoUrl(null);
     setPreviewReady(false);
+    setActiveWorkspaceTab('preview');
     stickToBottomRef.current = true;
     if (sid) {
       void deleteSession(sid);
@@ -269,6 +278,22 @@ export default function HomeScreen() {
     }
   }, [scrollToBottom]);
 
+  const pasteLogsToChat = useCallback((logs: string) => {
+    const trimmedLogs = logs.trim();
+    if (!trimmedLogs) return;
+
+    setInput(
+      [
+        'Please fix the Expo issue shown in these logs:',
+        '',
+        '```log',
+        trimmedLogs,
+        '```',
+      ].join('\n')
+    );
+    setActiveWorkspaceTab('preview');
+  }, []);
+
   const subtleBorder = isDark ? '#2a2d30' : '#e6e6e8';
   const mutedText = isDark ? '#9BA1A6' : '#687076';
   const userBubble = isDark ? '#2b6cb0' : '#0a7ea4';
@@ -276,6 +301,8 @@ export default function HomeScreen() {
   const chipBg = isDark ? '#1f2123' : '#f6f7f9';
   const inputBg = isDark ? '#1f2123' : '#f6f7f9';
   const errorColor = isDark ? '#ff6b6b' : '#c92a2a';
+  const workspaceBg = isDark ? '#141618' : '#ffffff';
+  const workspaceTabBg = isDark ? '#202428' : '#f1f5f9';
   const statusAccent = isDark ? '#7dd3fc' : '#0a7ea4';
   const statusBg = isDark ? '#171b1f' : '#f8fafc';
   const statusBorder = isDark ? '#2f3842' : '#dce6ee';
@@ -474,14 +501,70 @@ export default function HomeScreen() {
             </ThemedText>
           </View>
         </KeyboardAvoidingView>
-        {previewReady && expoUrl ? (
+        {expoUrl || sessionId ? (
           <View
             style={[
               styles.previewPane,
               { borderColor: subtleBorder },
               isWide ? styles.previewPaneWide : styles.previewPaneNarrow,
             ]}>
-            <SandboxPreview url={expoUrl} />
+            <View
+              style={[
+                styles.workspaceTabs,
+                { backgroundColor: workspaceBg, borderBottomColor: subtleBorder },
+              ]}>
+              {(
+                [
+                  { id: 'preview', label: 'Preview', icon: 'phone-portrait-outline' },
+                  { id: 'files', label: 'Files', icon: 'folder-open-outline' },
+                  { id: 'logs', label: 'Logs', icon: 'terminal-outline' },
+                ] as const
+              ).map((tab) => {
+                const selected = activeWorkspaceTab === tab.id;
+                return (
+                  <Pressable
+                    key={tab.id}
+                    onPress={() => setActiveWorkspaceTab(tab.id)}
+                    style={({ pressed }) => [
+                      styles.workspaceTab,
+                      {
+                        backgroundColor: selected ? workspaceTabBg : 'transparent',
+                        opacity: pressed ? 0.75 : 1,
+                      },
+                    ]}>
+                    <Ionicons
+                      name={tab.icon}
+                      size={15}
+                      color={selected ? palette.tint : mutedText}
+                    />
+                    <ThemedText
+                      style={[
+                        styles.workspaceTabText,
+                        { color: selected ? palette.text : mutedText },
+                      ]}>
+                      {tab.label}
+                    </ThemedText>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {activeWorkspaceTab === 'preview' ? (
+              previewReady && expoUrl ? (
+                <SandboxPreview url={expoUrl} />
+              ) : (
+                <View style={[styles.previewPending, { backgroundColor: workspaceBg }]}>
+                  <ActivityIndicator size="small" color={palette.tint} />
+                  <ThemedText style={[styles.previewPendingText, { color: mutedText }]}>
+                    Preview will appear when the build finishes.
+                  </ThemedText>
+                </View>
+              )
+            ) : activeWorkspaceTab === 'files' ? (
+              <FileExplorer sessionId={sessionId} />
+            ) : (
+              <ExpoLogs sessionId={sessionId} onPasteToChat={pasteLogsToChat} />
+            )}
           </View>
         ) : null}
       </View>
@@ -499,6 +582,38 @@ const styles = StyleSheet.create({
     minHeight: 0,
     minWidth: 0,
     overflow: 'hidden',
+  },
+  workspaceTabs: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  workspaceTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  workspaceTabText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  previewPending: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    padding: 24,
+  },
+  previewPendingText: {
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'center',
   },
   previewPaneWide: {
     flex: 1,
