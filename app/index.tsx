@@ -80,6 +80,7 @@ export default function HomeScreen() {
   const [previewReady, setPreviewReady] = useState(false);
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>('preview');
   const [showQr, setShowQr] = useState(false);
+  const [previewReloadKey, setPreviewReloadKey] = useState(0);
   const sessionIdRef = useRef<string | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -235,6 +236,7 @@ export default function HomeScreen() {
     setPreviewReady(false);
     setActiveWorkspaceTab('preview');
     setShowQr(false);
+    setPreviewReloadKey(0);
     if (sid) {
       void deleteSession(sid);
     }
@@ -260,6 +262,10 @@ export default function HomeScreen() {
     if (!expoUrl) return;
     void Linking.openURL(expoUrl);
   }, [expoUrl]);
+
+  const reloadPreview = useCallback(() => {
+    setPreviewReloadKey((key) => key + 1);
+  }, []);
 
   const subtleBorder = isDark ? '#2a2d30' : '#e6e6e8';
   const mutedText = isDark ? '#9BA1A6' : '#687076';
@@ -533,6 +539,17 @@ export default function HomeScreen() {
                       </ThemedText>
                     </View>
                     <Pressable
+                      onPress={reloadPreview}
+                      style={({ pressed }) => [
+                        styles.previewAction,
+                        { borderColor: subtleBorder, opacity: pressed ? 0.75 : 1 },
+                      ]}>
+                      <Ionicons name="refresh-outline" size={14} color={palette.text} />
+                      <ThemedText style={[styles.previewActionText, { color: palette.text }]}>
+                        Reload
+                      </ThemedText>
+                    </Pressable>
+                    <Pressable
                       onPress={openPreviewUrl}
                       style={({ pressed }) => [
                         styles.previewAction,
@@ -558,7 +575,7 @@ export default function HomeScreen() {
                 ) : null}
 
                 {previewReady && expoUrl ? (
-                  <SandboxPreview url={expoUrl} />
+                  <SandboxPreview key={`${expoUrl}-${previewReloadKey}`} url={expoUrl} />
                 ) : (
                   <View style={styles.previewPending}>
                     <ActivityIndicator size="small" color={palette.tint} />
