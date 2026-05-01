@@ -10,11 +10,26 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
    npm install
    ```
 
-2. Start the app
+2. Configure environment variables
+
+   ```bash
+   cp .env.example .env
+   # then fill in E2B_API_KEY and ANTHROPIC_API_KEY
+   ```
+
+   - `E2B_API_KEY` — get one at https://e2b.dev
+   - `OPENAI_API_KEY` — used by `opencode` running inside the sandbox
+   - `OPENCODE_MODEL` — optional, defaults to `openai/gpt-5.5`
+
+   Keys are server-side only (consumed by `app/api/build+api.ts`); do **not** prefix them with `EXPO_PUBLIC_`.
+
+3. Start the app
 
    ```bash
    npx expo start
    ```
+
+   The chat UI calls `POST /api/build`, which spins up an E2B `opencode` sandbox, starts `opencode serve` on port 4096, and talks to it through the [`@opencode-ai/sdk`](https://opencode.ai/docs/sdk/) over the sandbox's public host (`Sandbox.getHost(4096)`). Each opencode SSE event (text part, tool call, etc.) is forwarded as NDJSON and rendered as a discrete chat message. Subsequent prompts in the same chat reuse the sandbox + opencode session.
 
 In the output, you'll find options to open the app in a
 
