@@ -2,7 +2,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
+  Linking,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -42,6 +45,25 @@ const SUGGESTIONS = [
   'A pricing page with three tiers',
 ];
 
+const toExpoGoUrl = (url: string) => {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      const path = parsed.pathname === '/' ? '' : parsed.pathname;
+      return `exp://${parsed.host}${path}${parsed.search}`;
+    }
+  } catch {
+    // Keep the original value if the URL is already a custom scheme.
+  }
+
+  return url;
+};
+
+const qrImageUrl = (value: string) =>
+  `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=12&data=${encodeURIComponent(
+    value
+  )}`;
+
 export default function HomeScreen() {
   const scheme = useColorScheme() ?? 'light';
   const palette = Colors[scheme];
@@ -57,11 +79,13 @@ export default function HomeScreen() {
   const [expoUrl, setExpoUrl] = useState<string | null>(null);
   const [previewReady, setPreviewReady] = useState(false);
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>('preview');
+  const [showQr, setShowQr] = useState(false);
   const sessionIdRef = useRef<string | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
 
   const hasMessages = messages.length > 0;
   const canSend = input.trim().length > 0 && !inFlight;
+  const expoGoUrl = expoUrl ? toExpoGoUrl(expoUrl) : null;
 
   useEffect(() => {
     return () => {
@@ -210,6 +234,7 @@ export default function HomeScreen() {
     setExpoUrl(null);
     setPreviewReady(false);
     setActiveWorkspaceTab('preview');
+    setShowQr(false);
     if (sid) {
       void deleteSession(sid);
     }
@@ -230,6 +255,11 @@ export default function HomeScreen() {
     );
     setActiveWorkspaceTab('preview');
   }, []);
+
+  const openPreviewUrl = useCallback(() => {
+    if (!expoUrl) return;
+    void Linking.openURL(expoUrl);
+  }, [expoUrl]);
 
   const subtleBorder = isDark ? '#2a2d30' : '#e6e6e8';
   const mutedText = isDark ? '#9BA1A6' : '#687076';
@@ -483,16 +513,61 @@ export default function HomeScreen() {
             </View>
 
             {activeWorkspaceTab === 'preview' ? (
-              previewReady && expoUrl ? (
-                <SandboxPreview url={expoUrl} />
-              ) : (
-                <View style={[styles.previewPending, { backgroundColor: workspaceBg }]}>
-                  <ActivityIndicator size="small" color={palette.tint} />
-                  <ThemedText style={[styles.previewPendingText, { color: mutedText }]}>
-                    Preview will appear when the build finishes.
-                  </ThemedText>
-                </View>
-              )
+              <View style={[styles.previewContent, { backgroundColor: workspaceBg }]}>
+                {expoUrl ? (
+                  <View
+                    style={[
+                      styles.previewToolbar,
+                      { backgroundColor: workspaceBg, borderBottomColor: subtleBorder },
+                    ]}>
+                    <View
+                      style={[
+                        styles.previewUrlPill,
+                        { backgroundColor: inputBg, borderColor: subtleBorder },
+                      ]}>
+                      <Ionicons name="link-outline" size={14} color={mutedText} />
+                      <ThemedText
+                        numberOfLines={1}
+                        style={[styles.previewUrlText, { color: mutedText }]}>
+                        {expoUrl}
+                      </ThemedText>
+                    </View>
+                    <Pressable
+                      onPress={openPreviewUrl}
+                      style={({ pressed }) => [
+                        styles.previewAction,
+                        { borderColor: subtleBorder, opacity: pressed ? 0.75 : 1 },
+                      ]}>
+                      <Ionicons name="open-outline" size={14} color={palette.text} />
+                      <ThemedText style={[styles.previewActionText, { color: palette.text }]}>
+                        Open
+                      </ThemedText>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setShowQr(true)}
+                      style={({ pressed }) => [
+                        styles.previewAction,
+                        { borderColor: subtleBorder, opacity: pressed ? 0.75 : 1 },
+                      ]}>
+                      <Ionicons name="qr-code-outline" size={14} color={palette.text} />
+                      <ThemedText style={[styles.previewActionText, { color: palette.text }]}>
+                        Expo Go
+                      </ThemedText>
+                    </Pressable>
+                  </View>
+                ) : null}
+
+                {previewReady && expoUrl ? (
+                  <SandboxPreview url={expoUrl} />
+                ) : (
+                  <View style={styles.previewPending}>
+                    <ActivityIndicator size="small" color={palette.tint} />
+                    <ThemedText style={[styles.previewPendingText, { color: mutedText }]}>
+                      Preview will appear when the build finishes.
+                    </ThemedText>
+                  </View>
+                )}
+              </View>
             ) : activeWorkspaceTab === 'files' ? (
               <FileExplorer sessionId={sessionId} />
             ) : (
@@ -501,6 +576,60 @@ export default function HomeScreen() {
           </View>
         ) : null}
       </View>
+
+      <Modal
+        visible={showQr && Boolean(expoGoUrl)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowQr(false)}>
+        <Pressable style={styles.qrBackdrop} onPress={() => setShowQr(false)}>
+          <Pressable
+            style={[
+              styles.qrCard,
+              { backgroundColor: workspaceBg, borderColor: subtleBorder },
+            ]}
+            onPress={(event) => event.stopPropagation()}>
+            <View style={styles.qrHeader}>
+              <View>
+                <ThemedText style={styles.qrTitle}>Expo Go QR</ThemedText>
+                <ThemedText style={[styles.qrSubtitle, { color: mutedText }]}>
+                  Scan this from Expo Go on your phone.
+                </ThemedText>
+              </View>
+              <Pressable
+                hitSlop={8}
+                onPress={() => setShowQr(false)}
+                style={({ pressed }) => [styles.qrClose, pressed && { opacity: 0.65 }]}>
+                <Ionicons name="close" size={20} color={palette.text} />
+              </Pressable>
+            </View>
+
+            {expoGoUrl ? (
+              <>
+                <View style={styles.qrImageFrame}>
+                  <Image
+                    source={{ uri: qrImageUrl(expoGoUrl) }}
+                    style={styles.qrImage}
+                    resizeMode="contain"
+                  />
+                </View>
+                <View
+                  style={[
+                    styles.expoGoUrlPill,
+                    { backgroundColor: inputBg, borderColor: subtleBorder },
+                  ]}>
+                  <Ionicons name="phone-portrait-outline" size={14} color={mutedText} />
+                  <ThemedText
+                    numberOfLines={2}
+                    style={[styles.expoGoUrlText, { color: mutedText }]}>
+                    {expoGoUrl}
+                  </ThemedText>
+                </View>
+              </>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -547,6 +676,109 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     textAlign: 'center',
+  },
+  previewContent: {
+    flex: 1,
+    minHeight: 0,
+    minWidth: 0,
+  },
+  previewToolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  previewUrlPill: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  previewUrlText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  previewAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  previewActionText: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '700',
+  },
+  qrBackdrop: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.58)',
+    padding: 20,
+  },
+  qrCard: {
+    width: '100%',
+    maxWidth: 380,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 24,
+    padding: 18,
+    gap: 16,
+  },
+  qrHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 14,
+  },
+  qrTitle: {
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '800',
+  },
+  qrSubtitle: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 2,
+  },
+  qrClose: {
+    padding: 2,
+  },
+  qrImageFrame: {
+    alignSelf: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 12,
+  },
+  qrImage: {
+    width: 260,
+    height: 260,
+  },
+  expoGoUrlPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  expoGoUrlText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 11,
+    lineHeight: 15,
   },
   previewPaneWide: {
     flex: 1,
