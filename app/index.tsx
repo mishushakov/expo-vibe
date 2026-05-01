@@ -762,11 +762,11 @@ export default function HomeScreen() {
     </View>
   );
 
-  const renderChatPane = () => (
+  const renderChatPane = (avoidKeyboard = true) => (
     <KeyboardAvoidingView
       style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}>
+      behavior={avoidKeyboard && Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={avoidKeyboard && Platform.OS === 'ios' ? 8 : 0}>
       {hasMessages ? (
         <View style={styles.messagesViewport}>
           <ScrollView
@@ -972,9 +972,11 @@ export default function HomeScreen() {
             </Pressable>
           </View>
         </View>
-        <ThemedText style={[styles.disclaimer, { color: mutedText }]}>
-          Expo Vibe runs on E2B. Review generated code before shipping.
-        </ThemedText>
+        {isWide ? (
+          <ThemedText style={[styles.disclaimer, { color: mutedText }]}>
+            Expo Vibe runs on E2B. Review generated code before shipping.
+          </ThemedText>
+        ) : null}
       </View>
     </KeyboardAvoidingView>
   );
@@ -983,16 +985,8 @@ export default function HomeScreen() {
     <View
       style={[
         styles.mobileTabs,
-        { backgroundColor: palette.background, borderBottomColor: subtleBorder },
+        { backgroundColor: palette.background, borderTopColor: subtleBorder },
       ]}>
-      <Pressable
-        onPress={openMobileSessions}
-        hitSlop={8}
-        accessibilityLabel="Open vibes"
-        accessibilityRole="button"
-        style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}>
-        <Ionicons name="menu-outline" size={21} color={palette.text} />
-      </Pressable>
       {(
         [
           { id: 'chat', label: 'Chat', icon: 'chatbubble-ellipses-outline' },
@@ -1022,6 +1016,26 @@ export default function HomeScreen() {
           </Pressable>
         );
       })}
+    </View>
+  );
+
+  const renderMobileTopBar = () => (
+    <View
+      style={[
+        styles.mobileTopBar,
+        { backgroundColor: palette.background, borderBottomColor: subtleBorder },
+      ]}>
+      <Pressable
+        onPress={openMobileSessions}
+        hitSlop={8}
+        accessibilityLabel="Open vibes"
+        accessibilityRole="button"
+        style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}>
+        <Ionicons name="menu-outline" size={21} color={palette.text} />
+      </Pressable>
+      <ThemedText type="defaultSemiBold" style={styles.mobileTopTitle}>
+        Expo Vibes
+      </ThemedText>
       <Pressable
         onPress={toggle}
         hitSlop={8}
@@ -1188,14 +1202,18 @@ export default function HomeScreen() {
             </View>
           </>
         ) : (
-          <View style={styles.mobileShell}>
-            {renderMobileTabs()}
+          <KeyboardAvoidingView
+            style={styles.mobileShell}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={0}>
+            {renderMobileTopBar()}
             <View style={styles.mobileTabContent}>
               {activeMobileTab === 'chat'
-                ? renderChatPane()
+                ? renderChatPane(false)
                 : renderWorkspaceContent(activeMobileTab)}
             </View>
-          </View>
+            {renderMobileTabs()}
+          </KeyboardAvoidingView>
         )}
       </View>
 
@@ -1385,13 +1403,31 @@ const styles = StyleSheet.create({
     minHeight: 0,
     minWidth: 0,
   },
+  mobileTopBar: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  mobileTopTitle: {
+    flex: 1,
+    minWidth: 0,
+    textAlign: 'center',
+    fontSize: 14,
+    lineHeight: 18,
+  },
   mobileTabs: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 28,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   mobileTab: {
     flex: 1,
