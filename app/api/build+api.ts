@@ -22,14 +22,20 @@ const RUN_TIMEOUT_MS = 10 * 60 * 1000;
 async function createSessionState(opts: {
   e2bApiKey: string;
   openaiApiKey: string;
+  githubToken?: string;
   log: (msg: string) => void;
 }): Promise<SessionState> {
   const { log } = opts;
+  const sandboxEnvs: Record<string, string> = { OPENAI_API_KEY: opts.openaiApiKey };
+  if (opts.githubToken) {
+    sandboxEnvs.GH_TOKEN = opts.githubToken;
+    sandboxEnvs.GITHUB_TOKEN = opts.githubToken;
+  }
 
   log(`creating sandbox (template=${TEMPLATE})`);
   const sandbox = await Sandbox.create(TEMPLATE, {
     apiKey: opts.e2bApiKey,
-    envs: { OPENAI_API_KEY: opts.openaiApiKey },
+    envs: sandboxEnvs,
     timeoutMs: SANDBOX_TIMEOUT_MS,
   });
   log(`sandbox ready: ${sandbox.sandboxId}`);
@@ -53,6 +59,7 @@ export async function POST(request: Request) {
 
   const e2bApiKey = process.env.E2B_API_KEY;
   const openaiApiKey = process.env.OPENAI_API_KEY;
+  const githubToken = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
   const modelSpec = process.env.OPENCODE_MODEL ?? 'openai/gpt-5-mini';
   if (!e2bApiKey) {
     return Response.json({ error: 'E2B_API_KEY not set on server' }, { status: 500 });
@@ -219,7 +226,7 @@ export async function POST(request: Request) {
       try {
         let state = sessions.get(chatId);
         if (!state) {
-          state = await createSessionState({ e2bApiKey, openaiApiKey, log });
+          state = await createSessionState({ e2bApiKey, openaiApiKey, githubToken, log });
           sessions.set(chatId, state);
         } else {
           await state.sandbox.setTimeout(SANDBOX_TIMEOUT_MS).catch(() => {});
@@ -248,7 +255,10 @@ export async function POST(request: Request) {
 
         const result = await state.sandbox.commands.run(cmd, {
           cwd: '/home/user/app',
-          envs: { OPENAI_API_KEY: openaiApiKey },
+          envs: {
+            OPENAI_API_KEY: openaiApiKey,
+            ...(githubToken ? { GH_TOKEN: githubToken, GITHUB_TOKEN: githubToken } : {}),
+          },
           timeoutMs: RUN_TIMEOUT_MS,
           onStdout: (data: string) => {
             process.stdout.write(`[opencode-run ${state.sandbox.sandboxId}] ${data}`);

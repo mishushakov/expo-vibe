@@ -31,6 +31,7 @@ export const template = Template()
   .runCmd(`npx create-expo-app@latest ${APP_DIR} --yes`)
   .copy('AGENTS.md', `${APP_DIR}/AGENTS.md`)
   .setWorkdir(APP_DIR)
+  .aptInstall(['gh'])
   .setStartCmd(
     `bash -lc 'mkdir -p /tmp/expo-vibe && : > ${EXPO_LOG_PATH} && cd ${APP_DIR} && npx expo start --port ${EXPO_PORT} 2>&1 | tee -a ${EXPO_LOG_PATH}'`,
     waitForPort(EXPO_PORT)

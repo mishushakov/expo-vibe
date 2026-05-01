@@ -16,7 +16,7 @@ import {
   View,
 } from 'react-native';
 import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ExpoLogs } from '@/components/expo-logs';
 import { FileExplorer } from '@/components/file-explorer';
@@ -63,6 +63,19 @@ const SUGGESTIONS = [
   'A pomodoro timer',
   'A pricing page with three tiers',
 ];
+
+const GITHUB_PUBLISH_PROMPT = [
+  'Publish the current Expo app to GitHub.',
+  '',
+  'Use the GitHub CLI (`gh`) from /home/user/app.',
+  'First check `gh auth status`. If authentication is missing, explain that the sandbox needs `GH_TOKEN` or `GITHUB_TOKEN` and stop.',
+  'If this directory is not a git repo, initialize it.',
+  'Ensure secrets, .env files, node_modules, build output, and local cache files are not committed.',
+  'Commit the current app with a clear message.',
+  'If no origin remote exists, create a new private GitHub repository with a sensible name for this app and push the default branch.',
+  'If origin already exists, push the current branch.',
+  'Report the GitHub repository URL when done.',
+].join('\n');
 
 const BOTTOM_PIN_THRESHOLD = 48;
 const MOBILE_DRAWER_MAX_WIDTH = 320;
@@ -123,6 +136,7 @@ export default function HomeScreen() {
   const isDark = scheme === 'dark';
   const { toggle } = useThemeMode();
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const isWide = width >= 768;
   const initialChatRef = useRef<ChatSession | null>(null);
   if (!initialChatRef.current) {
@@ -689,6 +703,11 @@ export default function HomeScreen() {
     setPreviewReloadKey((key) => key + 1);
   }, []);
 
+  const publishToGithub = useCallback(() => {
+    if (!sessionId || inFlight) return;
+    void send(GITHUB_PUBLISH_PROMPT);
+  }, [inFlight, send, sessionId]);
+
   const subtleBorder = isDark ? '#2a2d30' : '#e6e6e8';
   const mutedText = isDark ? '#9BA1A6' : '#687076';
   const userBubble = isDark ? '#2b6cb0' : '#0a7ea4';
@@ -711,6 +730,8 @@ export default function HomeScreen() {
     inputRange: [0, 1],
     outputRange: [subtleBorder, palette.tint],
   });
+  const canPublishToGithub = Boolean(sessionId) && !inFlight;
+  const mobileTopInset = isWide ? 0 : insets.top;
 
   const renderSessionPane = (variant: 'desktop' | 'drawer') => (
     <View
@@ -1056,35 +1077,69 @@ export default function HomeScreen() {
     </View>
   );
 
+  const renderGithubButton = () => (
+    <Pressable
+      onPress={publishToGithub}
+      disabled={!canPublishToGithub}
+      hitSlop={8}
+      accessibilityLabel="Push app to GitHub"
+      accessibilityRole="button"
+      style={({ pressed }) => [
+        styles.githubSyncButton,
+        {
+          backgroundColor: 'transparent',
+          borderColor: subtleBorder,
+        },
+        pressed && { opacity: 0.6 },
+        !canPublishToGithub && { opacity: 0.35 },
+      ]}>
+      <Ionicons name="logo-github" size={17} color={palette.text} />
+      <ThemedText style={[styles.githubSyncText, { color: palette.text }]}>Sync</ThemedText>
+    </Pressable>
+  );
+
   const renderMobileTopBar = () => (
     <View
       style={[
         styles.mobileTopBar,
-        { backgroundColor: palette.background, borderBottomColor: subtleBorder },
+        {
+          backgroundColor: palette.background,
+          borderBottomColor: subtleBorder,
+          paddingTop: mobileTopInset + 8,
+        },
       ]}>
       <Pressable
         onPress={openMobileSessions}
         hitSlop={8}
         accessibilityLabel="Open vibes"
         accessibilityRole="button"
-        style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}>
+        style={({ pressed }) => [
+          styles.iconBtn,
+          styles.mobileTopControl,
+          pressed && { opacity: 0.6 },
+        ]}>
         <Ionicons name="menu-outline" size={21} color={palette.text} />
       </Pressable>
-      <ThemedText type="defaultSemiBold" style={styles.mobileTopTitle}>
-        Expo Vibes
-      </ThemedText>
-      <Pressable
-        onPress={toggle}
-        hitSlop={8}
-        accessibilityLabel="Toggle dark mode"
-        accessibilityRole="button"
-        style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}>
-        <Ionicons
-          name={isDark ? 'sunny-outline' : 'moon-outline'}
-          size={20}
-          color={palette.text}
-        />
-      </Pressable>
+      <View pointerEvents="none" style={[styles.mobileTopTitleWrap, { top: mobileTopInset }]}>
+        <ThemedText type="defaultSemiBold" numberOfLines={1} style={styles.mobileTopTitle}>
+          Expo Vibes
+        </ThemedText>
+      </View>
+      <View style={styles.mobileTopActions}>
+        {renderGithubButton()}
+        <Pressable
+          onPress={toggle}
+          hitSlop={8}
+          accessibilityLabel="Toggle dark mode"
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}>
+          <Ionicons
+            name={isDark ? 'sunny-outline' : 'moon-outline'}
+            size={20}
+            color={palette.text}
+          />
+        </Pressable>
+      </View>
     </View>
   );
 
@@ -1129,6 +1184,7 @@ export default function HomeScreen() {
         );
       })}
       <View style={styles.workspaceTabSpacer} />
+      {renderGithubButton()}
       <Pressable
         onPress={toggle}
         hitSlop={8}
@@ -1222,7 +1278,11 @@ export default function HomeScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: palette.background }]} edges={['top']}>
+    <View
+      style={[
+        styles.safe,
+        { backgroundColor: palette.background, paddingTop: isWide ? insets.top : 0 },
+      ]}>
       <View style={[styles.body, isWide ? styles.bodyRow : styles.bodyColumn]}>
         {isWide ? (
           <>
@@ -1336,7 +1396,7 @@ export default function HomeScreen() {
           </Pressable>
         </Pressable>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -1448,21 +1508,49 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   mobileTopBar: {
+    position: 'relative',
     minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  mobileTopControl: {
+    zIndex: 1,
+  },
+  mobileTopTitleWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 112,
+  },
   mobileTopTitle: {
-    flex: 1,
-    minWidth: 0,
     textAlign: 'center',
     fontSize: 14,
     lineHeight: 18,
+  },
+  mobileTopActions: {
+    zIndex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  githubSyncButton: {
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 10,
+  },
+  githubSyncText: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '500',
   },
   mobileTabs: {
     flexDirection: 'row',

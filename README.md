@@ -14,12 +14,13 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
 
    ```bash
    cp .env.example .env
-   # then fill in E2B_API_KEY and ANTHROPIC_API_KEY
+   # then fill in E2B_API_KEY and OPENAI_API_KEY
    ```
 
    - `E2B_API_KEY` — get one at https://e2b.dev
    - `OPENAI_API_KEY` — used by `opencode` running inside the sandbox
    - `OPENCODE_MODEL` — optional, defaults to `openai/gpt-5.5`
+   - `GH_TOKEN` — optional, used by `gh` inside the sandbox when publishing apps to GitHub
 
    Keys are server-side only (consumed by `app/api/build+api.ts`); do **not** prefix them with `EXPO_PUBLIC_`.
 
