@@ -1239,7 +1239,9 @@ export default function HomeScreen() {
                 transform: [{ translateX: mobileDrawerTranslateX }],
               },
             ]}>
-            {renderSessionPane('drawer')}
+            <SafeAreaView style={styles.sessionDrawerSafe} edges={['top']}>
+              {renderSessionPane('drawer')}
+            </SafeAreaView>
           </Animated.View>
         </View>
       </Modal>
@@ -1392,6 +1394,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.18,
     shadowRadius: 18,
     elevation: 8,
+  },
+  sessionDrawerSafe: {
+    flex: 1,
+    minHeight: 0,
+    minWidth: 0,
   },
   mobileShell: {
     flex: 1,
