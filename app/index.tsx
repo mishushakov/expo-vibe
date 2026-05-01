@@ -14,6 +14,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ExpoLogs } from '@/components/expo-logs';
@@ -35,6 +36,7 @@ type Message = {
 
 type WorkspaceTab = 'preview' | 'files' | 'logs';
 type MobileTab = 'chat' | WorkspaceTab;
+type MessageScrollMetrics = { contentHeight: number; layoutHeight: number; y: number };
 
 let msgCounter = 0;
 const newMsgId = (suffix: string) => `${Date.now()}-${++msgCounter}-${suffix}`;
@@ -45,6 +47,8 @@ const SUGGESTIONS = [
   'A pomodoro timer',
   'A pricing page with three tiers',
 ];
+
+const BOTTOM_PIN_THRESHOLD = 48;
 
 const toExpoGoUrl = (url: string) => {
   try {
@@ -82,7 +86,15 @@ export default function HomeScreen() {
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>('preview');
   const [activeMobileTab, setActiveMobileTab] = useState<MobileTab>('chat');
   const [showQr, setShowQr] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [previewReloadKey, setPreviewReloadKey] = useState(0);
+  const messagesScrollRef = useRef<ScrollView | null>(null);
+  const shouldStickToBottomRef = useRef(true);
+  const messagesScrollMetricsRef = useRef<MessageScrollMetrics>({
+    contentHeight: 0,
+    layoutHeight: 0,
+    y: 0,
+  });
   const sessionIdRef = useRef<string | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -95,6 +107,95 @@ export default function HomeScreen() {
       abortRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (!hasMessages) {
+      shouldStickToBottomRef.current = true;
+      messagesScrollMetricsRef.current = {
+        contentHeight: 0,
+        layoutHeight: messagesScrollMetricsRef.current.layoutHeight,
+        y: 0,
+      };
+      setShowScrollToBottom(false);
+    }
+  }, [hasMessages]);
+
+  const scrollMessagesToBottom = useCallback((animated = true) => {
+    requestAnimationFrame(() => {
+      messagesScrollRef.current?.scrollToEnd({ animated });
+    });
+  }, []);
+
+  const updateMessageScrollPin = useCallback((metrics: Partial<MessageScrollMetrics>) => {
+    const nextMetrics = { ...messagesScrollMetricsRef.current, ...metrics };
+    messagesScrollMetricsRef.current = nextMetrics;
+
+    const distanceFromBottom = Math.max(
+      0,
+      nextMetrics.contentHeight - nextMetrics.layoutHeight - nextMetrics.y
+    );
+    const canScroll = nextMetrics.contentHeight > nextMetrics.layoutHeight + BOTTOM_PIN_THRESHOLD;
+    const isPinned = distanceFromBottom <= BOTTOM_PIN_THRESHOLD;
+
+    shouldStickToBottomRef.current = isPinned;
+    setShowScrollToBottom(canScroll && !isPinned);
+  }, []);
+
+  const handleMessagesLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      const layoutHeight = event.nativeEvent.layout.height;
+      messagesScrollMetricsRef.current = {
+        ...messagesScrollMetricsRef.current,
+        layoutHeight,
+      };
+
+      if (shouldStickToBottomRef.current) {
+        setShowScrollToBottom(false);
+        scrollMessagesToBottom(false);
+        return;
+      }
+
+      updateMessageScrollPin({ layoutHeight });
+    },
+    [scrollMessagesToBottom, updateMessageScrollPin]
+  );
+
+  const handleMessagesContentSizeChange = useCallback(
+    (_width: number, contentHeight: number) => {
+      const wasPinned = shouldStickToBottomRef.current;
+      messagesScrollMetricsRef.current = {
+        ...messagesScrollMetricsRef.current,
+        contentHeight,
+      };
+
+      if (wasPinned) {
+        setShowScrollToBottom(false);
+        scrollMessagesToBottom(true);
+        return;
+      }
+
+      updateMessageScrollPin({ contentHeight });
+    },
+    [scrollMessagesToBottom, updateMessageScrollPin]
+  );
+
+  const handleMessagesScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+      updateMessageScrollPin({
+        contentHeight: contentSize.height,
+        layoutHeight: layoutMeasurement.height,
+        y: contentOffset.y,
+      });
+    },
+    [updateMessageScrollPin]
+  );
+
+  const pinMessagesToBottom = useCallback(() => {
+    shouldStickToBottomRef.current = true;
+    setShowScrollToBottom(false);
+    scrollMessagesToBottom(true);
+  }, [scrollMessagesToBottom]);
 
   const appendMessage = useCallback((msg: Message) => {
     setMessages((prev) => [...prev, msg]);
@@ -231,6 +332,7 @@ export default function HomeScreen() {
     abortRef.current?.abort();
     const sid = sessionIdRef.current;
     sessionIdRef.current = undefined;
+    shouldStickToBottomRef.current = true;
     setMessages([]);
     setInFlight(false);
     setSessionId(null);
@@ -239,6 +341,7 @@ export default function HomeScreen() {
     setActiveWorkspaceTab('preview');
     setActiveMobileTab('chat');
     setShowQr(false);
+    setShowScrollToBottom(false);
     setPreviewReloadKey(0);
     if (sid) {
       void deleteSession(sid);
@@ -294,79 +397,104 @@ export default function HomeScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}>
       {hasMessages ? (
-        <ScrollView
-          style={styles.flex}
-          contentContainerStyle={styles.messagesContent}
-          showsVerticalScrollIndicator={false}>
-          {messages.map((m) => {
-            if (m.role === 'system') {
-              if (m.text.trim().length === 0) return null;
-              const statusIconName = m.error
-                ? 'alert-circle-outline'
-                : m.statusKind === 'thinking'
-                  ? 'sparkles-outline'
-                  : m.statusKind === 'file'
-                    ? 'document-attach-outline'
-                    : 'terminal-outline';
-              const statusTone = m.error ? errorColor : statusAccent;
-              const statusTextColor = m.error ? errorColor : mutedText;
-              return (
-                <View key={m.id} style={styles.systemRow}>
-                  <View
-                    style={[
-                      styles.systemPill,
-                      {
-                        backgroundColor: m.error ? statusErrorBg : statusBg,
-                        borderColor: m.error ? statusErrorBorder : statusBorder,
-                      },
-                    ]}>
+        <View style={styles.messagesViewport}>
+          <ScrollView
+            ref={messagesScrollRef}
+            style={styles.flex}
+            contentContainerStyle={styles.messagesContent}
+            keyboardShouldPersistTaps="handled"
+            onContentSizeChange={handleMessagesContentSizeChange}
+            onLayout={handleMessagesLayout}
+            onScroll={handleMessagesScroll}
+            scrollEventThrottle={16}
+            showsVerticalScrollIndicator={false}>
+            {messages.map((m) => {
+              if (m.role === 'system') {
+                if (m.text.trim().length === 0) return null;
+                const statusIconName = m.error
+                  ? 'alert-circle-outline'
+                  : m.statusKind === 'thinking'
+                    ? 'sparkles-outline'
+                    : m.statusKind === 'file'
+                      ? 'document-attach-outline'
+                      : 'terminal-outline';
+                const statusTone = m.error ? errorColor : statusAccent;
+                const statusTextColor = m.error ? errorColor : mutedText;
+                return (
+                  <View key={m.id} style={styles.systemRow}>
                     <View
                       style={[
-                        styles.systemIcon,
-                        { backgroundColor: m.error ? statusErrorIconBg : statusIconBg },
+                        styles.systemPill,
+                        {
+                          backgroundColor: m.error ? statusErrorBg : statusBg,
+                          borderColor: m.error ? statusErrorBorder : statusBorder,
+                        },
                       ]}>
-                      <Ionicons name={statusIconName} size={13} color={statusTone} />
+                      <View
+                        style={[
+                          styles.systemIcon,
+                          { backgroundColor: m.error ? statusErrorIconBg : statusIconBg },
+                        ]}>
+                        <Ionicons name={statusIconName} size={13} color={statusTone} />
+                      </View>
+                      <ThemedText style={[styles.systemText, { color: statusTextColor }]}>
+                        {m.text}
+                      </ThemedText>
                     </View>
-                    <ThemedText style={[styles.systemText, { color: statusTextColor }]}>
+                  </View>
+                );
+              }
+
+              const isUser = m.role === 'user';
+              if (!isUser && m.text.length === 0) return null;
+              return (
+                <View
+                  key={m.id}
+                  style={[
+                    styles.bubbleRow,
+                    isUser ? styles.bubbleRowEnd : styles.bubbleRowStart,
+                  ]}>
+                  <View
+                    style={[
+                      styles.bubble,
+                      isUser
+                        ? { backgroundColor: userBubble, borderBottomRightRadius: 4 }
+                        : {
+                            backgroundColor: assistantBubble,
+                            borderBottomLeftRadius: 4,
+                          },
+                    ]}>
+                    <ThemedText
+                      style={[
+                        isUser ? { color: '#fff' } : undefined,
+                        !isUser && m.error ? { color: errorColor } : undefined,
+                        !isUser ? styles.assistantText : undefined,
+                      ]}>
                       {m.text}
                     </ThemedText>
                   </View>
                 </View>
               );
-            }
-
-            const isUser = m.role === 'user';
-            if (!isUser && m.text.length === 0) return null;
-            return (
-              <View
-                key={m.id}
-                style={[
-                  styles.bubbleRow,
-                  isUser ? styles.bubbleRowEnd : styles.bubbleRowStart,
-                ]}>
-                <View
-                  style={[
-                    styles.bubble,
-                    isUser
-                      ? { backgroundColor: userBubble, borderBottomRightRadius: 4 }
-                      : {
-                          backgroundColor: assistantBubble,
-                          borderBottomLeftRadius: 4,
-                        },
-                  ]}>
-                  <ThemedText
-                    style={[
-                      isUser ? { color: '#fff' } : undefined,
-                      !isUser && m.error ? { color: errorColor } : undefined,
-                      !isUser ? styles.assistantText : undefined,
-                    ]}>
-                    {m.text}
-                  </ThemedText>
-                </View>
-              </View>
-            );
-          })}
-        </ScrollView>
+            })}
+          </ScrollView>
+          {showScrollToBottom ? (
+            <Pressable
+              accessibilityLabel="Scroll to latest message"
+              accessibilityRole="button"
+              hitSlop={8}
+              onPress={pinMessagesToBottom}
+              style={({ pressed }) => [
+                styles.scrollToBottomButton,
+                {
+                  backgroundColor: inputBg,
+                  borderColor: subtleBorder,
+                  opacity: pressed ? 0.82 : 1,
+                },
+              ]}>
+              <Ionicons name="arrow-down" size={20} color={palette.text} />
+            </Pressable>
+          ) : null}
+        </View>
       ) : (
         <ScrollView
           contentContainerStyle={styles.heroContent}
@@ -599,288 +727,58 @@ export default function HomeScreen() {
       <View style={[styles.body, isWide ? styles.bodyRow : styles.bodyColumn]}>
         {isWide ? (
           <>
-            <KeyboardAvoidingView
-          style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}>
-          {hasMessages ? (
-            <ScrollView
-              style={styles.flex}
-              contentContainerStyle={styles.messagesContent}
-              showsVerticalScrollIndicator={false}>
-              {messages.map((m) => {
-                if (m.role === 'system') {
-                  if (m.text.trim().length === 0) return null;
-                  const statusIconName = m.error
-                    ? 'alert-circle-outline'
-                    : m.statusKind === 'thinking'
-                      ? 'sparkles-outline'
-                      : m.statusKind === 'file'
-                        ? 'document-attach-outline'
-                        : 'terminal-outline';
-                  const statusTone = m.error ? errorColor : statusAccent;
-                  const statusTextColor = m.error ? errorColor : mutedText;
-                  return (
-                    <View key={m.id} style={styles.systemRow}>
-                      <View
-                        style={[
-                          styles.systemPill,
+            {renderChatPane()}
+            {expoUrl || sessionId ? (
+              <View
+                style={[
+                  styles.previewPane,
+                  { borderColor: subtleBorder },
+                  styles.previewPaneWide,
+                ]}>
+                <View
+                  style={[
+                    styles.workspaceTabs,
+                    { backgroundColor: workspaceBg, borderBottomColor: subtleBorder },
+                  ]}>
+                  {(
+                    [
+                      { id: 'preview', label: 'Preview', icon: 'phone-portrait-outline' },
+                      { id: 'files', label: 'Files', icon: 'folder-open-outline' },
+                      { id: 'logs', label: 'Logs', icon: 'terminal-outline' },
+                    ] as const
+                  ).map((tab) => {
+                    const selected = activeWorkspaceTab === tab.id;
+                    return (
+                      <Pressable
+                        key={tab.id}
+                        onPress={() => setActiveWorkspaceTab(tab.id)}
+                        style={({ pressed }) => [
+                          styles.workspaceTab,
                           {
-                            backgroundColor: m.error ? statusErrorBg : statusBg,
-                            borderColor: m.error ? statusErrorBorder : statusBorder,
+                            backgroundColor: selected ? workspaceTabBg : 'transparent',
+                            opacity: pressed ? 0.75 : 1,
                           },
                         ]}>
-                        <View
+                        <Ionicons
+                          name={tab.icon}
+                          size={15}
+                          color={selected ? palette.tint : mutedText}
+                        />
+                        <ThemedText
                           style={[
-                            styles.systemIcon,
-                            { backgroundColor: m.error ? statusErrorIconBg : statusIconBg },
+                            styles.workspaceTabText,
+                            { color: selected ? palette.text : mutedText },
                           ]}>
-                          <Ionicons name={statusIconName} size={13} color={statusTone} />
-                        </View>
-                        <ThemedText style={[styles.systemText, { color: statusTextColor }]}>
-                          {m.text}
+                          {tab.label}
                         </ThemedText>
-                      </View>
-                    </View>
-                  );
-                }
+                      </Pressable>
+                    );
+                  })}
+                </View>
 
-                const isUser = m.role === 'user';
-                if (!isUser && m.text.length === 0) return null;
-                return (
-                  <View
-                    key={m.id}
-                    style={[
-                      styles.bubbleRow,
-                      isUser ? styles.bubbleRowEnd : styles.bubbleRowStart,
-                    ]}>
-                    <View
-                      style={[
-                        styles.bubble,
-                        isUser
-                          ? { backgroundColor: userBubble, borderBottomRightRadius: 4 }
-                          : {
-                              backgroundColor: assistantBubble,
-                              borderBottomLeftRadius: 4,
-                            },
-                      ]}>
-                      <ThemedText
-                        style={[
-                          isUser ? { color: '#fff' } : undefined,
-                          !isUser && m.error ? { color: errorColor } : undefined,
-                          !isUser ? styles.assistantText : undefined,
-                        ]}>
-                        {m.text}
-                      </ThemedText>
-                    </View>
-                  </View>
-                );
-              })}
-            </ScrollView>
-          ) : (
-            <ScrollView
-              contentContainerStyle={styles.heroContent}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}>
-              <View style={styles.hero}>
-                <ThemedText style={styles.heroTitle}>What do you want to build?</ThemedText>
-                <ThemedText style={[styles.heroSubtitle, { color: mutedText }]}>
-                  Describe an app or screen and we&apos;ll build it inside an E2B sandbox.
-                </ThemedText>
+                {renderWorkspaceContent(activeWorkspaceTab)}
               </View>
-
-              <View style={styles.suggestions}>
-                {SUGGESTIONS.map((s) => (
-                  <Pressable
-                    key={s}
-                    onPress={() => send(s)}
-                    disabled={inFlight}
-                    style={({ pressed }) => [
-                      styles.chip,
-                      {
-                        backgroundColor: chipBg,
-                        borderColor: subtleBorder,
-                        opacity: pressed || inFlight ? 0.7 : 1,
-                      },
-                    ]}>
-                    <Ionicons name="sparkles-outline" size={14} color={mutedText} />
-                    <ThemedText style={[styles.chipText, { color: palette.text }]}>{s}</ThemedText>
-                  </Pressable>
-                ))}
-              </View>
-            </ScrollView>
-          )}
-
-          <View style={[styles.inputWrap, { borderTopColor: subtleBorder }]}>
-            <View
-              style={[
-                styles.inputBar,
-                { backgroundColor: inputBg, borderColor: subtleBorder },
-              ]}>
-              <TextInput
-                value={input}
-                onChangeText={setInput}
-                placeholder="Ask Expo Vibe to build something…"
-                placeholderTextColor={mutedText}
-                multiline
-                editable={!inFlight}
-                style={[styles.input, { color: palette.text }]}
-                onSubmitEditing={() => send(input)}
-                blurOnSubmit={false}
-              />
-              <View style={styles.inputControls}>
-                <Pressable hitSlop={8} style={styles.iconBtn} onPress={() => {}}>
-                  <Ionicons name="add" size={20} color={mutedText} />
-                </Pressable>
-                <Pressable
-                  disabled={!canSend}
-                  onPress={() => send(input)}
-                  style={({ pressed }) => [
-                    styles.sendBtn,
-                    {
-                      backgroundColor: canSend ? palette.tint : subtleBorder,
-                      opacity: pressed ? 0.8 : 1,
-                    },
-                  ]}>
-                  {inFlight ? (
-                    <ActivityIndicator size="small" color={mutedText} />
-                  ) : (
-                    <Ionicons
-                      name="arrow-up"
-                      size={18}
-                      color={canSend ? (isDark ? '#151718' : '#fff') : mutedText}
-                    />
-                  )}
-                </Pressable>
-              </View>
-            </View>
-            <ThemedText style={[styles.disclaimer, { color: mutedText }]}>
-              Expo Vibe runs on E2B. Review generated code before shipping.
-            </ThemedText>
-          </View>
-        </KeyboardAvoidingView>
-        {expoUrl || sessionId ? (
-          <View
-            style={[
-              styles.previewPane,
-              { borderColor: subtleBorder },
-              styles.previewPaneWide,
-            ]}>
-            <View
-              style={[
-                styles.workspaceTabs,
-                { backgroundColor: workspaceBg, borderBottomColor: subtleBorder },
-              ]}>
-              {(
-                [
-                  { id: 'preview', label: 'Preview', icon: 'phone-portrait-outline' },
-                  { id: 'files', label: 'Files', icon: 'folder-open-outline' },
-                  { id: 'logs', label: 'Logs', icon: 'terminal-outline' },
-                ] as const
-              ).map((tab) => {
-                const selected = activeWorkspaceTab === tab.id;
-                return (
-                  <Pressable
-                    key={tab.id}
-                    onPress={() => setActiveWorkspaceTab(tab.id)}
-                    style={({ pressed }) => [
-                      styles.workspaceTab,
-                      {
-                        backgroundColor: selected ? workspaceTabBg : 'transparent',
-                        opacity: pressed ? 0.75 : 1,
-                      },
-                    ]}>
-                    <Ionicons
-                      name={tab.icon}
-                      size={15}
-                      color={selected ? palette.tint : mutedText}
-                    />
-                    <ThemedText
-                      style={[
-                        styles.workspaceTabText,
-                        { color: selected ? palette.text : mutedText },
-                      ]}>
-                      {tab.label}
-                    </ThemedText>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            {activeWorkspaceTab === 'preview' ? (
-              <View style={[styles.previewContent, { backgroundColor: workspaceBg }]}>
-                {expoUrl ? (
-                  <View
-                    style={[
-                      styles.previewToolbar,
-                      { backgroundColor: workspaceBg, borderBottomColor: subtleBorder },
-                    ]}>
-                    <View
-                      style={[
-                        styles.previewUrlPill,
-                        { backgroundColor: inputBg, borderColor: subtleBorder },
-                      ]}>
-                      <Ionicons name="link-outline" size={14} color={mutedText} />
-                      <ThemedText
-                        numberOfLines={1}
-                        style={[styles.previewUrlText, { color: mutedText }]}>
-                        {expoUrl}
-                      </ThemedText>
-                    </View>
-                    <Pressable
-                      onPress={reloadPreview}
-                      style={({ pressed }) => [
-                        styles.previewAction,
-                        { borderColor: subtleBorder, opacity: pressed ? 0.75 : 1 },
-                      ]}>
-                      <Ionicons name="refresh-outline" size={14} color={palette.text} />
-                      <ThemedText style={[styles.previewActionText, { color: palette.text }]}>
-                        Reload
-                      </ThemedText>
-                    </Pressable>
-                    <Pressable
-                      onPress={openPreviewUrl}
-                      style={({ pressed }) => [
-                        styles.previewAction,
-                        { borderColor: subtleBorder, opacity: pressed ? 0.75 : 1 },
-                      ]}>
-                      <Ionicons name="open-outline" size={14} color={palette.text} />
-                      <ThemedText style={[styles.previewActionText, { color: palette.text }]}>
-                        Open
-                      </ThemedText>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => setShowQr(true)}
-                      style={({ pressed }) => [
-                        styles.previewAction,
-                        { borderColor: subtleBorder, opacity: pressed ? 0.75 : 1 },
-                      ]}>
-                      <Ionicons name="qr-code-outline" size={14} color={palette.text} />
-                      <ThemedText style={[styles.previewActionText, { color: palette.text }]}>
-                        Expo Go
-                      </ThemedText>
-                    </Pressable>
-                  </View>
-                ) : null}
-
-                {previewReady && expoUrl ? (
-                  <SandboxPreview key={`${expoUrl}-${previewReloadKey}`} url={expoUrl} />
-                ) : (
-                  <View style={styles.previewPending}>
-                    <ActivityIndicator size="small" color={palette.tint} />
-                    <ThemedText style={[styles.previewPendingText, { color: mutedText }]}>
-                      Preview will appear when the build finishes.
-                    </ThemedText>
-                  </View>
-                )}
-              </View>
-            ) : activeWorkspaceTab === 'files' ? (
-              <FileExplorer sessionId={sessionId} />
-            ) : (
-              <ExpoLogs sessionId={sessionId} onPasteToChat={pasteLogsToChat} />
-            )}
-          </View>
-        ) : null}
+            ) : null}
           </>
         ) : (
           <View style={styles.mobileShell}>
@@ -1193,10 +1091,33 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   chipText: { fontSize: 13 },
+  messagesViewport: {
+    flex: 1,
+    minHeight: 0,
+    minWidth: 0,
+    position: 'relative',
+  },
   messagesContent: {
     paddingHorizontal: 16,
     paddingVertical: 16,
     gap: 10,
+  },
+  scrollToBottomButton: {
+    position: 'absolute',
+    bottom: 12,
+    alignSelf: 'center',
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    elevation: 5,
+    zIndex: 2,
   },
   bubbleRow: { flexDirection: 'row' },
   bubbleRowStart: { justifyContent: 'flex-start' },
