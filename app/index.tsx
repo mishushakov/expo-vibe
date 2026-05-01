@@ -637,36 +637,33 @@ export default function HomeScreen() {
           </View>
           <Pressable
             onPress={reloadPreview}
+            accessibilityLabel="Reload preview"
+            accessibilityRole="button"
             style={({ pressed }) => [
               styles.previewAction,
               { borderColor: subtleBorder, opacity: pressed ? 0.75 : 1 },
             ]}>
-            <Ionicons name="refresh-outline" size={14} color={palette.text} />
-            <ThemedText style={[styles.previewActionText, { color: palette.text }]}>
-              Reload
-            </ThemedText>
+            <Ionicons name="refresh-outline" size={17} color={palette.text} />
           </Pressable>
           <Pressable
             onPress={openPreviewUrl}
+            accessibilityLabel="Open preview"
+            accessibilityRole="button"
             style={({ pressed }) => [
               styles.previewAction,
               { borderColor: subtleBorder, opacity: pressed ? 0.75 : 1 },
             ]}>
-            <Ionicons name="open-outline" size={14} color={palette.text} />
-            <ThemedText style={[styles.previewActionText, { color: palette.text }]}>
-              Open
-            </ThemedText>
+            <Ionicons name="open-outline" size={17} color={palette.text} />
           </Pressable>
           <Pressable
             onPress={() => setShowQr(true)}
+            accessibilityLabel="Show Expo Go QR code"
+            accessibilityRole="button"
             style={({ pressed }) => [
               styles.previewAction,
               { borderColor: subtleBorder, opacity: pressed ? 0.75 : 1 },
             ]}>
-            <Ionicons name="qr-code-outline" size={14} color={palette.text} />
-            <ThemedText style={[styles.previewActionText, { color: palette.text }]}>
-              Expo Go
-            </ThemedText>
+            <Ionicons name="qr-code-outline" size={17} color={palette.text} />
           </Pressable>
         </View>
       ) : null}
@@ -958,18 +955,12 @@ const styles = StyleSheet.create({
     lineHeight: 15,
   },
   previewAction: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    justifyContent: 'center',
+    width: 34,
+    height: 34,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  previewActionText: {
-    fontSize: 11,
-    lineHeight: 15,
-    fontWeight: '700',
+    borderRadius: 17,
   },
   qrBackdrop: {
     flex: 1,
