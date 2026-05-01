@@ -452,6 +452,25 @@ export default function HomeScreen() {
     [activeChatId, chatSessions, resetMessageScroll]
   );
 
+  const stopChat = useCallback(
+    (chatId: string) => {
+      const chat = chatSessions.find((item) => item.id === chatId);
+      if (!chat?.inFlight) return;
+
+      const controller = abortControllersRef.current.get(chatId);
+      controller?.abort();
+      abortControllersRef.current.delete(chatId);
+      patchChatSession(chatId, { inFlight: false });
+      appendMessageToChat(chatId, {
+        id: newMsgId('s'),
+        role: 'system',
+        statusKind: 'tool',
+        text: 'Stopped',
+      });
+    },
+    [appendMessageToChat, chatSessions, patchChatSession]
+  );
+
   const send = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
@@ -552,7 +571,7 @@ export default function HomeScreen() {
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        if (message !== 'Aborted') {
+        if (!controller.signal.aborted) {
           appendMessageToChat(chatId, {
             id: newMsgId('a'),
             role: 'assistant',
@@ -926,17 +945,23 @@ export default function HomeScreen() {
               <Ionicons name="add" size={20} color={mutedText} />
             </Pressable>
             <Pressable
-              disabled={!canSend}
-              onPress={() => send(input)}
+              disabled={!canSend && !inFlight}
+              onPress={() => (inFlight ? stopChat(activeChatId) : send(input))}
+              accessibilityLabel={inFlight ? 'Stop chat' : 'Send message'}
+              accessibilityRole="button"
               style={({ pressed }) => [
                 styles.sendBtn,
                 {
-                  backgroundColor: canSend ? palette.tint : subtleBorder,
+                  backgroundColor: canSend || inFlight ? palette.tint : subtleBorder,
                   opacity: pressed ? 0.8 : 1,
                 },
               ]}>
               {inFlight ? (
-                <ActivityIndicator size="small" color={mutedText} />
+                <Ionicons
+                  name="square"
+                  size={13}
+                  color={isDark ? '#151718' : '#fff'}
+                />
               ) : (
                 <Ionicons
                   name="arrow-up"
