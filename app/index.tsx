@@ -430,9 +430,6 @@ export default function HomeScreen() {
                 styles.inputBar,
                 { backgroundColor: inputBg, borderColor: subtleBorder },
               ]}>
-              <Pressable hitSlop={8} style={styles.iconBtn} onPress={() => {}}>
-                <Ionicons name="add" size={20} color={mutedText} />
-              </Pressable>
               <TextInput
                 value={input}
                 onChangeText={setInput}
@@ -444,26 +441,31 @@ export default function HomeScreen() {
                 onSubmitEditing={() => send(input)}
                 blurOnSubmit={false}
               />
-              <Pressable
-                disabled={!canSend}
-                onPress={() => send(input)}
-                style={({ pressed }) => [
-                  styles.sendBtn,
-                  {
-                    backgroundColor: canSend ? palette.tint : subtleBorder,
-                    opacity: pressed ? 0.8 : 1,
-                  },
-                ]}>
-                {inFlight ? (
-                  <ActivityIndicator size="small" color={mutedText} />
-                ) : (
-                  <Ionicons
-                    name="arrow-up"
-                    size={18}
-                    color={canSend ? (isDark ? '#151718' : '#fff') : mutedText}
-                  />
-                )}
-              </Pressable>
+              <View style={styles.inputControls}>
+                <Pressable hitSlop={8} style={styles.iconBtn} onPress={() => {}}>
+                  <Ionicons name="add" size={20} color={mutedText} />
+                </Pressable>
+                <Pressable
+                  disabled={!canSend}
+                  onPress={() => send(input)}
+                  style={({ pressed }) => [
+                    styles.sendBtn,
+                    {
+                      backgroundColor: canSend ? palette.tint : subtleBorder,
+                      opacity: pressed ? 0.8 : 1,
+                    },
+                  ]}>
+                  {inFlight ? (
+                    <ActivityIndicator size="small" color={mutedText} />
+                  ) : (
+                    <Ionicons
+                      name="arrow-up"
+                      size={18}
+                      color={canSend ? (isDark ? '#151718' : '#fff') : mutedText}
+                    />
+                  )}
+                </Pressable>
+              </View>
             </View>
             <ThemedText style={[styles.disclaimer, { color: mutedText }]}>
               Expo Vibe runs on E2B. Review generated code before shipping.
@@ -931,13 +933,12 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   inputBar: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 8,
+    gap: 4,
     borderRadius: 24,
     borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 6,
   },
   iconBtn: {
     width: 32,
@@ -947,12 +948,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   input: {
-    flex: 1,
     fontSize: 15,
     lineHeight: 20,
-    paddingVertical: 8,
-    paddingHorizontal: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 2,
     maxHeight: 140,
+  },
+  inputControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   sendBtn: {
     width: 32,
