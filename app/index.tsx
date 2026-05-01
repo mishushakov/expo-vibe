@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Image,
   KeyboardAvoidingView,
   Linking,
@@ -37,9 +38,24 @@ type Message = {
 type WorkspaceTab = 'preview' | 'files' | 'logs';
 type MobileTab = 'chat' | WorkspaceTab;
 type MessageScrollMetrics = { contentHeight: number; layoutHeight: number; y: number };
+type ChatSession = {
+  id: string;
+  title: string;
+  messages: Message[];
+  input: string;
+  sessionId: string | null;
+  expoUrl: string | null;
+  previewReady: boolean;
+  inFlight: boolean;
+  createdAt: number;
+  updatedAt: number;
+};
+type ChatSessionPatch = Partial<Omit<ChatSession, 'id' | 'title' | 'createdAt' | 'updatedAt'>>;
 
 let msgCounter = 0;
+let chatCounter = 0;
 const newMsgId = (suffix: string) => `${Date.now()}-${++msgCounter}-${suffix}`;
+const newChatId = () => `${Date.now()}-${++chatCounter}-chat`;
 
 const SUGGESTIONS = [
   'A landing page for a SaaS product',
@@ -49,6 +65,38 @@ const SUGGESTIONS = [
 ];
 
 const BOTTOM_PIN_THRESHOLD = 48;
+const MOBILE_DRAWER_MAX_WIDTH = 320;
+
+const createChatSession = (): ChatSession => ({
+  id: newChatId(),
+  title: 'New chat',
+  messages: [],
+  input: '',
+  sessionId: null,
+  expoUrl: null,
+  previewReady: false,
+  inFlight: false,
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
+});
+
+const titleFromChat = (messages: Message[], input: string) => {
+  const source = messages.find((m) => m.role === 'user' && m.text.trim().length > 0)?.text ?? input;
+  const title = source.trim().replace(/\s+/g, ' ');
+  if (!title) return 'New chat';
+  return title.length > 52 ? `${title.slice(0, 49)}...` : title;
+};
+
+const appendMessageToList = (messages: Message[], msg: Message) => [...messages, msg];
+
+const upsertMessageInList = (messages: Message[], msg: Message) => {
+  const idx = messages.findIndex((m) => m.id === msg.id);
+  if (idx === -1) return [...messages, msg];
+
+  const next = messages.slice();
+  next[idx] = msg;
+  return next;
+};
 
 const toExpoGoUrl = (url: string) => {
   try {
@@ -76,7 +124,13 @@ export default function HomeScreen() {
   const { toggle } = useThemeMode();
   const { width } = useWindowDimensions();
   const isWide = width >= 768;
+  const initialChatRef = useRef<ChatSession | null>(null);
+  if (!initialChatRef.current) {
+    initialChatRef.current = createChatSession();
+  }
 
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>(() => [initialChatRef.current!]);
+  const [activeChatId, setActiveChatId] = useState(() => initialChatRef.current!.id);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [inFlight, setInFlight] = useState(false);
@@ -86,8 +140,11 @@ export default function HomeScreen() {
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>('preview');
   const [activeMobileTab, setActiveMobileTab] = useState<MobileTab>('chat');
   const [showQr, setShowQr] = useState(false);
+  const [showMobileSessions, setShowMobileSessions] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [previewReloadKey, setPreviewReloadKey] = useState(0);
+  const mobileDrawerWidth = Math.min(width * 0.86, MOBILE_DRAWER_MAX_WIDTH);
+  const mobileDrawerTranslateX = useRef(new Animated.Value(-MOBILE_DRAWER_MAX_WIDTH)).current;
   const messagesScrollRef = useRef<ScrollView | null>(null);
   const shouldStickToBottomRef = useRef(true);
   const messagesScrollMetricsRef = useRef<MessageScrollMetrics>({
@@ -95,18 +152,76 @@ export default function HomeScreen() {
     layoutHeight: 0,
     y: 0,
   });
+  const activeChatIdRef = useRef(activeChatId);
   const sessionIdRef = useRef<string | undefined>(undefined);
-  const abortRef = useRef<AbortController | null>(null);
+  const abortControllersRef = useRef(new Map<string, AbortController>());
 
   const hasMessages = messages.length > 0;
   const canSend = input.trim().length > 0 && !inFlight;
   const expoGoUrl = expoUrl ? toExpoGoUrl(expoUrl) : null;
+  const orderedChatSessions = useMemo(
+    () => [...chatSessions].sort((a, b) => b.createdAt - a.createdAt),
+    [chatSessions]
+  );
+
+  const openMobileSessions = useCallback(() => {
+    setShowMobileSessions(true);
+  }, []);
+
+  const closeMobileSessions = useCallback(() => {
+    Animated.timing(mobileDrawerTranslateX, {
+      toValue: -mobileDrawerWidth,
+      duration: 170,
+      useNativeDriver: true,
+    }).start(() => setShowMobileSessions(false));
+  }, [mobileDrawerTranslateX, mobileDrawerWidth]);
 
   useEffect(() => {
+    const controllers = abortControllersRef.current;
     return () => {
-      abortRef.current?.abort();
+      controllers.forEach((controller) => controller.abort());
+      controllers.clear();
     };
   }, []);
+
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
+
+  useEffect(() => {
+    sessionIdRef.current = sessionId ?? undefined;
+  }, [sessionId]);
+
+  useEffect(() => {
+    setChatSessions((prev) =>
+      prev.map((chat) =>
+        chat.id === activeChatId
+          ? {
+              ...chat,
+              title: titleFromChat(messages, input),
+              messages,
+              input,
+              sessionId,
+              expoUrl,
+              previewReady,
+              inFlight,
+              updatedAt: Date.now(),
+            }
+          : chat
+      )
+    );
+  }, [activeChatId, expoUrl, inFlight, input, messages, previewReady, sessionId]);
+
+  useEffect(() => {
+    if (!showMobileSessions) return;
+
+    mobileDrawerTranslateX.setValue(-mobileDrawerWidth);
+    Animated.timing(mobileDrawerTranslateX, {
+      toValue: 0,
+      duration: 190,
+      useNativeDriver: true,
+    }).start();
+  }, [mobileDrawerTranslateX, mobileDrawerWidth, showMobileSessions]);
 
   useEffect(() => {
     if (!hasMessages) {
@@ -197,56 +312,181 @@ export default function HomeScreen() {
     scrollMessagesToBottom(true);
   }, [scrollMessagesToBottom]);
 
-  const appendMessage = useCallback((msg: Message) => {
-    setMessages((prev) => [...prev, msg]);
+  const resetMessageScroll = useCallback(() => {
+    shouldStickToBottomRef.current = true;
+    messagesScrollMetricsRef.current = {
+      contentHeight: 0,
+      layoutHeight: messagesScrollMetricsRef.current.layoutHeight,
+      y: 0,
+    };
+    setShowScrollToBottom(false);
   }, []);
 
-  // Insert a message if its id is new, replace it in place if not. Used so
-  // that streaming part updates (text growing, tool transitioning
-  // pending → running → completed) collapse into a single bubble each.
-  const upsertMessage = useCallback((msg: Message) => {
-    setMessages((prev) => {
-      const idx = prev.findIndex((m) => m.id === msg.id);
-      if (idx === -1) return [...prev, msg];
-      const next = prev.slice();
-      next[idx] = msg;
-      return next;
-    });
-  }, []);
+  const updateChatSession = useCallback(
+    (chatId: string, updater: (chat: ChatSession) => ChatSession) => {
+      setChatSessions((prev) =>
+        prev.map((chat) => {
+          if (chat.id !== chatId) return chat;
+
+          const next = updater(chat);
+          return {
+            ...next,
+            title: titleFromChat(next.messages, next.input),
+            updatedAt: Date.now(),
+          };
+        })
+      );
+    },
+    []
+  );
+
+  const patchChatSession = useCallback(
+    (chatId: string, patch: ChatSessionPatch) => {
+      updateChatSession(chatId, (chat) => ({ ...chat, ...patch }));
+
+      if (activeChatIdRef.current !== chatId) return;
+
+      if (patch.messages !== undefined) setMessages(patch.messages);
+      if (patch.input !== undefined) setInput(patch.input);
+      if (patch.sessionId !== undefined) {
+        sessionIdRef.current = patch.sessionId ?? undefined;
+        setSessionId(patch.sessionId);
+      }
+      if (patch.expoUrl !== undefined) setExpoUrl(patch.expoUrl);
+      if (patch.previewReady !== undefined) setPreviewReady(patch.previewReady);
+      if (patch.inFlight !== undefined) setInFlight(patch.inFlight);
+    },
+    [updateChatSession]
+  );
+
+  const appendMessageToChat = useCallback(
+    (chatId: string, msg: Message) => {
+      updateChatSession(chatId, (chat) => ({
+        ...chat,
+        messages: appendMessageToList(chat.messages, msg),
+      }));
+
+      if (activeChatIdRef.current === chatId) {
+        setMessages((prev) => appendMessageToList(prev, msg));
+      }
+    },
+    [updateChatSession]
+  );
+
+  const upsertMessageInChat = useCallback(
+    (chatId: string, msg: Message) => {
+      updateChatSession(chatId, (chat) => ({
+        ...chat,
+        messages: upsertMessageInList(chat.messages, msg),
+      }));
+
+      if (activeChatIdRef.current === chatId) {
+        setMessages((prev) => upsertMessageInList(prev, msg));
+      }
+    },
+    [updateChatSession]
+  );
+
+  const selectChat = useCallback(
+    (chatId: string) => {
+      if (chatId === activeChatId) {
+        setActiveMobileTab('chat');
+        closeMobileSessions();
+        return;
+      }
+
+      const chat = chatSessions.find((item) => item.id === chatId);
+      if (!chat) return;
+
+      activeChatIdRef.current = chat.id;
+      sessionIdRef.current = chat.sessionId ?? undefined;
+      setActiveChatId(chat.id);
+      setMessages(chat.messages);
+      setInput(chat.input);
+      setSessionId(chat.sessionId);
+      setInFlight(chat.inFlight);
+      setExpoUrl(chat.expoUrl);
+      setPreviewReady(chat.previewReady);
+      setShowQr(false);
+      setActiveMobileTab('chat');
+      setActiveWorkspaceTab('preview');
+      resetMessageScroll();
+      closeMobileSessions();
+    },
+    [activeChatId, chatSessions, closeMobileSessions, resetMessageScroll]
+  );
+
+  const deleteChat = useCallback(
+    (chatId: string) => {
+      const chat = chatSessions.find((item) => item.id === chatId);
+      if (!chat || chat.inFlight) return;
+
+      const remainingChats = chatSessions.filter((item) => item.id !== chatId);
+      const fallbackChat =
+        chatId === activeChatId
+          ? [...remainingChats].sort((a, b) => b.createdAt - a.createdAt)[0] ?? createChatSession()
+          : null;
+
+      if (chat.sessionId) {
+        void deleteSession(chat.sessionId);
+      }
+
+      setChatSessions(remainingChats.length > 0 ? remainingChats : [fallbackChat!]);
+
+      if (!fallbackChat) return;
+
+      activeChatIdRef.current = fallbackChat.id;
+      sessionIdRef.current = fallbackChat.sessionId ?? undefined;
+      setActiveChatId(fallbackChat.id);
+      setMessages(fallbackChat.messages);
+      setInput(fallbackChat.input);
+      setSessionId(fallbackChat.sessionId);
+      setInFlight(fallbackChat.inFlight);
+      setExpoUrl(fallbackChat.expoUrl);
+      setPreviewReady(fallbackChat.previewReady);
+      setShowQr(false);
+      setActiveMobileTab('chat');
+      setActiveWorkspaceTab('preview');
+      resetMessageScroll();
+    },
+    [activeChatId, chatSessions, resetMessageScroll]
+  );
 
   const send = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed || inFlight) return;
 
-      appendMessage({ id: newMsgId('u'), role: 'user', text: trimmed });
-      setInput('');
-      setInFlight(true);
+      const chatId = activeChatId;
+      const startSessionId = sessionId ?? undefined;
+      appendMessageToChat(chatId, { id: newMsgId('u'), role: 'user', text: trimmed });
+      patchChatSession(chatId, { input: '', inFlight: true });
 
       const controller = new AbortController();
-      abortRef.current = controller;
+      abortControllersRef.current.set(chatId, controller);
 
       try {
         await streamBuild({
           prompt: trimmed,
-          sessionId: sessionIdRef.current,
+          sessionId: startSessionId,
           signal: controller.signal,
           onEvent: (event) => {
             switch (event.type) {
               case 'meta':
-                sessionIdRef.current = event.sessionId;
-                setSessionId(event.sessionId);
-                setExpoUrl(event.expoUrl);
+                patchChatSession(chatId, {
+                  sessionId: event.sessionId,
+                  expoUrl: event.expoUrl,
+                });
                 break;
               case 'text':
-                upsertMessage({
+                upsertMessageInChat(chatId, {
                   id: `part-${event.id}`,
                   role: 'assistant',
                   text: event.text,
                 });
                 break;
               case 'reasoning':
-                upsertMessage({
+                upsertMessageInChat(chatId, {
                   id: `part-${event.id}`,
                   role: 'system',
                   statusKind: 'thinking',
@@ -269,7 +509,7 @@ export default function HomeScreen() {
                     label = `${event.name}: ${event.error ?? 'failed'}`;
                     break;
                 }
-                upsertMessage({
+                upsertMessageInChat(chatId, {
                   id: `part-${event.id}`,
                   role: 'system',
                   statusKind: 'tool',
@@ -279,7 +519,7 @@ export default function HomeScreen() {
                 break;
               }
               case 'file':
-                upsertMessage({
+                upsertMessageInChat(chatId, {
                   id: `part-${event.id}`,
                   role: 'system',
                   statusKind: 'file',
@@ -288,9 +528,9 @@ export default function HomeScreen() {
                 break;
               case 'done':
                 if (event.exitCode === 0) {
-                  setPreviewReady(true);
+                  patchChatSession(chatId, { previewReady: true });
                 } else {
-                  appendMessage({
+                  appendMessageToChat(chatId, {
                     id: newMsgId('s'),
                     role: 'system',
                     statusKind: 'tool',
@@ -300,7 +540,7 @@ export default function HomeScreen() {
                 }
                 break;
               case 'error':
-                appendMessage({
+                appendMessageToChat(chatId, {
                   id: newMsgId('a'),
                   role: 'assistant',
                   text: `Error: ${event.message}`,
@@ -313,7 +553,7 @@ export default function HomeScreen() {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (message !== 'Aborted') {
-          appendMessage({
+          appendMessageToChat(chatId, {
             id: newMsgId('a'),
             role: 'assistant',
             text: `Error: ${message}`,
@@ -321,32 +561,58 @@ export default function HomeScreen() {
           });
         }
       } finally {
-        setInFlight(false);
-        abortRef.current = null;
+        if (abortControllersRef.current.get(chatId) === controller) {
+          abortControllersRef.current.delete(chatId);
+        }
+        patchChatSession(chatId, { inFlight: false });
       }
     },
-    [inFlight, appendMessage, upsertMessage]
+    [
+      activeChatId,
+      inFlight,
+      sessionId,
+      appendMessageToChat,
+      patchChatSession,
+      upsertMessageInChat,
+    ]
   );
 
   const startNewChat = useCallback(() => {
-    abortRef.current?.abort();
-    const sid = sessionIdRef.current;
+    const hasCurrentChatContent =
+      messages.length > 0 || input.trim().length > 0 || inFlight || Boolean(sessionId || expoUrl);
+
+    if (!hasCurrentChatContent) {
+      setActiveMobileTab('chat');
+      closeMobileSessions();
+      return;
+    }
+
+    const nextChat = createChatSession();
+    activeChatIdRef.current = nextChat.id;
     sessionIdRef.current = undefined;
-    shouldStickToBottomRef.current = true;
+    setChatSessions((prev) => [nextChat, ...prev]);
+    setActiveChatId(nextChat.id);
     setMessages([]);
     setInFlight(false);
+    setInput('');
     setSessionId(null);
     setExpoUrl(null);
     setPreviewReady(false);
     setActiveWorkspaceTab('preview');
     setActiveMobileTab('chat');
     setShowQr(false);
-    setShowScrollToBottom(false);
+    resetMessageScroll();
     setPreviewReloadKey(0);
-    if (sid) {
-      void deleteSession(sid);
-    }
-  }, []);
+    closeMobileSessions();
+  }, [
+    closeMobileSessions,
+    expoUrl,
+    inFlight,
+    input,
+    messages.length,
+    resetMessageScroll,
+    sessionId,
+  ]);
 
   const pasteLogsToChat = useCallback((logs: string) => {
     const trimmedLogs = logs.trim();
@@ -390,6 +656,92 @@ export default function HomeScreen() {
   const statusErrorBg = isDark ? '#26171a' : '#fff5f5';
   const statusErrorBorder = isDark ? '#5c262d' : '#ffc9c9';
   const statusErrorIconBg = isDark ? '#3b2024' : '#ffe3e3';
+  const sessionPaneBg = isDark ? '#151719' : '#fbfcfd';
+  const selectedSessionBg = isDark ? '#20262b' : '#eef7fb';
+
+  const renderSessionPane = (variant: 'desktop' | 'drawer') => (
+    <View
+      style={[
+        styles.sessionPane,
+        variant === 'desktop' ? styles.sessionPaneDesktop : styles.sessionPaneDrawer,
+        { backgroundColor: sessionPaneBg, borderColor: subtleBorder },
+      ]}>
+      <View style={[styles.sessionPaneHeader, { borderBottomColor: subtleBorder }]}>
+        <ThemedText type="defaultSemiBold" style={styles.sessionPaneTitle}>
+          Expo Vibes
+        </ThemedText>
+      </View>
+      <View style={[styles.sessionPaneActions, { borderBottomColor: subtleBorder }]}>
+        <Pressable
+          onPress={startNewChat}
+          accessibilityLabel="New vibe"
+          accessibilityRole="button"
+          style={({ pressed }) => [
+            styles.sessionNewButton,
+            {
+              borderColor: subtleBorder,
+              backgroundColor: inputBg,
+              opacity: pressed ? 0.75 : 1,
+            },
+          ]}>
+          <Ionicons name="add" size={18} color={palette.text} />
+          <ThemedText style={[styles.sessionNewButtonText, { color: palette.text }]}>
+            New Vibe
+          </ThemedText>
+        </Pressable>
+      </View>
+
+      <ScrollView
+        contentContainerStyle={styles.sessionList}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}>
+        {orderedChatSessions.map((chat) => {
+          const selected = chat.id === activeChatId;
+          return (
+            <Pressable
+              key={chat.id}
+              onPress={() => selectChat(chat.id)}
+              accessibilityRole="button"
+              accessibilityLabel={`Open chat: ${chat.title}`}
+              style={({ pressed }) => [
+                styles.sessionItem,
+                {
+                  backgroundColor: selected ? selectedSessionBg : 'transparent',
+                  borderColor: selected ? palette.tint : 'transparent',
+                  opacity: pressed ? 0.78 : 1,
+                },
+              ]}>
+              <View style={styles.sessionItemText}>
+                <ThemedText
+                  numberOfLines={2}
+                  style={[styles.sessionTitle, { color: palette.text }]}>
+                  {chat.title}
+                </ThemedText>
+              </View>
+              {chat.inFlight ? (
+                <ActivityIndicator size="small" color={palette.tint} />
+              ) : (
+                <Pressable
+                  onPress={(event) => {
+                    event.stopPropagation();
+                    deleteChat(chat.id);
+                  }}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Delete chat: ${chat.title}`}
+                  style={({ pressed }) => [
+                    styles.sessionDeleteButton,
+                    { opacity: pressed ? 0.65 : 1 },
+                  ]}>
+                  <Ionicons name="trash-outline" size={15} color={mutedText} />
+                </Pressable>
+              )}
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
 
   const renderChatPane = () => (
     <KeyboardAvoidingView
@@ -501,9 +853,32 @@ export default function HomeScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           <View style={styles.hero}>
-            <ThemedText style={styles.heroTitle}>What do you want to build?</ThemedText>
-            <ThemedText style={[styles.heroSubtitle, { color: mutedText }]}>
-              Describe an app or screen and we&apos;ll build it inside an E2B sandbox.
+            <View
+              style={[
+                styles.heroBrandMark,
+                {
+                  backgroundColor: isDark ? '#10242b' : '#e7f8fb',
+                  borderColor: subtleBorder,
+                },
+              ]}>
+              <View style={[styles.heroBrandMarkPlate, { backgroundColor: palette.tint }]}>
+                <Ionicons
+                  name="sparkles"
+                  size={26}
+                  color={isDark ? '#151718' : '#ffffff'}
+                />
+              </View>
+            </View>
+            <View style={styles.heroWordmark}>
+              <ThemedText style={[styles.heroWordmarkText, { color: palette.text }]}>
+                Expo
+              </ThemedText>
+              <ThemedText style={[styles.heroWordmarkText, { color: palette.tint }]}>
+                Vibes
+              </ThemedText>
+            </View>
+            <ThemedText style={[styles.heroTitle, { color: palette.text }]}>
+              What will you build?
             </ThemedText>
           </View>
 
@@ -585,6 +960,14 @@ export default function HomeScreen() {
         styles.mobileTabs,
         { backgroundColor: palette.background, borderBottomColor: subtleBorder },
       ]}>
+      <Pressable
+        onPress={openMobileSessions}
+        hitSlop={8}
+        accessibilityLabel="Open vibes"
+        accessibilityRole="button"
+        style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}>
+        <Ionicons name="menu-outline" size={21} color={palette.text} />
+      </Pressable>
       {(
         [
           { id: 'chat', label: 'Chat', icon: 'chatbubble-ellipses-outline' },
@@ -614,6 +997,74 @@ export default function HomeScreen() {
           </Pressable>
         );
       })}
+      <Pressable
+        onPress={toggle}
+        hitSlop={8}
+        accessibilityLabel="Toggle dark mode"
+        accessibilityRole="button"
+        style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}>
+        <Ionicons
+          name={isDark ? 'sunny-outline' : 'moon-outline'}
+          size={20}
+          color={palette.text}
+        />
+      </Pressable>
+    </View>
+  );
+
+  const renderWorkspaceTabs = () => (
+    <View
+      style={[
+        styles.workspaceTabs,
+        { backgroundColor: workspaceBg, borderBottomColor: subtleBorder },
+      ]}>
+      {(
+        [
+          { id: 'preview', label: 'Preview', icon: 'phone-portrait-outline' },
+          { id: 'files', label: 'Files', icon: 'folder-open-outline' },
+          { id: 'logs', label: 'Logs', icon: 'terminal-outline' },
+        ] as const
+      ).map((tab) => {
+        const selected = activeWorkspaceTab === tab.id;
+        return (
+          <Pressable
+            key={tab.id}
+            onPress={() => setActiveWorkspaceTab(tab.id)}
+            style={({ pressed }) => [
+              styles.workspaceTab,
+              {
+                backgroundColor: selected ? workspaceTabBg : 'transparent',
+                opacity: pressed ? 0.75 : 1,
+              },
+            ]}>
+            <Ionicons
+              name={tab.icon}
+              size={15}
+              color={selected ? palette.tint : mutedText}
+            />
+            <ThemedText
+              style={[
+                styles.workspaceTabText,
+                { color: selected ? palette.text : mutedText },
+              ]}>
+              {tab.label}
+            </ThemedText>
+          </Pressable>
+        );
+      })}
+      <View style={styles.workspaceTabSpacer} />
+      <Pressable
+        onPress={toggle}
+        hitSlop={8}
+        accessibilityLabel="Toggle dark mode"
+        accessibilityRole="button"
+        style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}>
+        <Ionicons
+          name={isDark ? 'sunny-outline' : 'moon-outline'}
+          size={20}
+          color={palette.text}
+        />
+      </Pressable>
     </View>
   );
 
@@ -696,86 +1147,20 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: palette.background }]} edges={['top']}>
-      <View style={[styles.header, { borderBottomColor: subtleBorder }]}>
-        <ThemedText type="defaultSemiBold">Expo Vibe</ThemedText>
-        <View style={styles.headerActions}>
-          {hasMessages ? (
-            <Pressable
-              onPress={startNewChat}
-              style={({ pressed }) => [styles.headerBtn, pressed && { opacity: 0.6 }]}>
-              <Ionicons name="add" size={18} color={palette.text} />
-              <ThemedText style={styles.newChatText}>New</ThemedText>
-            </Pressable>
-          ) : null}
-          <Pressable
-            onPress={toggle}
-            hitSlop={8}
-            style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}
-            accessibilityLabel="Toggle dark mode">
-            <Ionicons
-              name={isDark ? 'sunny-outline' : 'moon-outline'}
-              size={20}
-              color={palette.text}
-            />
-          </Pressable>
-        </View>
-      </View>
-
       <View style={[styles.body, isWide ? styles.bodyRow : styles.bodyColumn]}>
         {isWide ? (
           <>
+            {renderSessionPane('desktop')}
             {renderChatPane()}
-            {expoUrl || sessionId ? (
-              <View
-                style={[
-                  styles.previewPane,
-                  { borderColor: subtleBorder },
-                  styles.previewPaneWide,
-                ]}>
-                <View
-                  style={[
-                    styles.workspaceTabs,
-                    { backgroundColor: workspaceBg, borderBottomColor: subtleBorder },
-                  ]}>
-                  {(
-                    [
-                      { id: 'preview', label: 'Preview', icon: 'phone-portrait-outline' },
-                      { id: 'files', label: 'Files', icon: 'folder-open-outline' },
-                      { id: 'logs', label: 'Logs', icon: 'terminal-outline' },
-                    ] as const
-                  ).map((tab) => {
-                    const selected = activeWorkspaceTab === tab.id;
-                    return (
-                      <Pressable
-                        key={tab.id}
-                        onPress={() => setActiveWorkspaceTab(tab.id)}
-                        style={({ pressed }) => [
-                          styles.workspaceTab,
-                          {
-                            backgroundColor: selected ? workspaceTabBg : 'transparent',
-                            opacity: pressed ? 0.75 : 1,
-                          },
-                        ]}>
-                        <Ionicons
-                          name={tab.icon}
-                          size={15}
-                          color={selected ? palette.tint : mutedText}
-                        />
-                        <ThemedText
-                          style={[
-                            styles.workspaceTabText,
-                            { color: selected ? palette.text : mutedText },
-                          ]}>
-                          {tab.label}
-                        </ThemedText>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-
-                {renderWorkspaceContent(activeWorkspaceTab)}
-              </View>
-            ) : null}
+            <View
+              style={[
+                styles.previewPane,
+                { borderColor: subtleBorder },
+                styles.previewPaneWide,
+              ]}>
+              {renderWorkspaceTabs()}
+              {renderWorkspaceContent(activeWorkspaceTab)}
+            </View>
           </>
         ) : (
           <View style={styles.mobileShell}>
@@ -788,6 +1173,33 @@ export default function HomeScreen() {
           </View>
         )}
       </View>
+
+      <Modal
+        visible={showMobileSessions && !isWide}
+        transparent
+        animationType="none"
+        onRequestClose={closeMobileSessions}>
+        <View style={styles.sessionDrawerRoot}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close chats"
+            style={[StyleSheet.absoluteFill, styles.sessionDrawerBackdrop]}
+            onPress={closeMobileSessions}
+          />
+          <Animated.View
+            style={[
+              styles.sessionDrawerSheet,
+              {
+                width: mobileDrawerWidth,
+                backgroundColor: sessionPaneBg,
+                borderRightColor: subtleBorder,
+                transform: [{ translateX: mobileDrawerTranslateX }],
+              },
+            ]}>
+            {renderSessionPane('drawer')}
+          </Animated.View>
+        </View>
+      </Modal>
 
       <Modal
         visible={showQr && Boolean(expoGoUrl)}
@@ -852,6 +1264,92 @@ const styles = StyleSheet.create({
   body: { flex: 1, minHeight: 0, minWidth: 0 },
   bodyRow: { flexDirection: 'row' },
   bodyColumn: { flexDirection: 'column' },
+  sessionPane: {
+    minHeight: 0,
+    minWidth: 0,
+  },
+  sessionPaneDesktop: {
+    width: 260,
+    borderRightWidth: StyleSheet.hairlineWidth,
+  },
+  sessionPaneDrawer: {
+    flex: 1,
+  },
+  sessionPaneHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingTop: 14,
+    paddingBottom: 8,
+  },
+  sessionPaneActions: {
+    paddingHorizontal: 12,
+    paddingTop: 4,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  sessionPaneTitle: {
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  sessionNewButton: {
+    minHeight: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  sessionNewButtonText: {
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: '700',
+  },
+  sessionList: {
+    padding: 8,
+    gap: 4,
+  },
+  sessionItem: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  sessionItemText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  sessionTitle: {
+    fontSize: 13,
+    lineHeight: 17,
+  },
+  sessionDeleteButton: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
+  },
+  sessionDrawerRoot: {
+    flex: 1,
+  },
+  sessionDrawerBackdrop: {
+    backgroundColor: 'rgba(15, 23, 42, 0.42)',
+  },
+  sessionDrawerSheet: {
+    height: '100%',
+    borderRightWidth: StyleSheet.hairlineWidth,
+    shadowColor: '#000',
+    shadowOffset: { width: 8, height: 0 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 8,
+  },
   mobileShell: {
     flex: 1,
     minHeight: 0,
@@ -911,6 +1409,10 @@ const styles = StyleSheet.create({
   workspaceTabText: {
     fontSize: 12,
     fontWeight: '700',
+  },
+  workspaceTabSpacer: {
+    flex: 1,
+    minWidth: 0,
   },
   previewPending: {
     flex: 1,
@@ -1025,46 +1527,54 @@ const styles = StyleSheet.create({
     flex: 1,
     borderLeftWidth: StyleSheet.hairlineWidth,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  headerBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  newChatText: { fontSize: 14 },
   heroContent: {
     flexGrow: 1,
     justifyContent: 'center',
     paddingHorizontal: 24,
     paddingVertical: 32,
-    gap: 28,
+    gap: 30,
   },
-  hero: { alignItems: 'center', gap: 10 },
+  hero: { alignItems: 'center', gap: 14 },
+  heroBrandMark: {
+    width: 78,
+    height: 78,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 24,
+    borderWidth: StyleSheet.hairlineWidth,
+    shadowColor: '#0a7ea4',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.2,
+    shadowRadius: 18,
+    elevation: 6,
+    transform: [{ rotate: '-6deg' }],
+  },
+  heroBrandMarkPlate: {
+    width: 52,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
+    transform: [{ rotate: '6deg' }],
+  },
+  heroWordmark: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  heroWordmarkText: {
+    fontSize: 42,
+    lineHeight: 48,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
   heroTitle: {
-    fontSize: 30,
-    fontWeight: '700',
-    lineHeight: 36,
+    fontSize: 26,
+    lineHeight: 32,
+    fontWeight: '500',
     textAlign: 'center',
-  },
-  heroSubtitle: {
-    fontSize: 15,
-    lineHeight: 22,
-    textAlign: 'center',
-    maxWidth: 360,
   },
   suggestions: {
     flexDirection: 'row',
