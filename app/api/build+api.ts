@@ -53,7 +53,7 @@ export async function POST(request: Request) {
 
   const e2bApiKey = process.env.E2B_API_KEY;
   const openaiApiKey = process.env.OPENAI_API_KEY;
-  const modelSpec = process.env.OPENCODE_MODEL ?? 'openai/gpt-5';
+  const modelSpec = process.env.OPENCODE_MODEL ?? 'openai/gpt-5-mini';
   if (!e2bApiKey) {
     return Response.json({ error: 'E2B_API_KEY not set on server' }, { status: 500 });
   }
