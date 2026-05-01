@@ -34,6 +34,7 @@ type Message = {
 };
 
 type WorkspaceTab = 'preview' | 'files' | 'logs';
+type MobileTab = 'chat' | WorkspaceTab;
 
 let msgCounter = 0;
 const newMsgId = (suffix: string) => `${Date.now()}-${++msgCounter}-${suffix}`;
@@ -79,6 +80,7 @@ export default function HomeScreen() {
   const [expoUrl, setExpoUrl] = useState<string | null>(null);
   const [previewReady, setPreviewReady] = useState(false);
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>('preview');
+  const [activeMobileTab, setActiveMobileTab] = useState<MobileTab>('chat');
   const [showQr, setShowQr] = useState(false);
   const [previewReloadKey, setPreviewReloadKey] = useState(0);
   const sessionIdRef = useRef<string | undefined>(undefined);
@@ -235,6 +237,7 @@ export default function HomeScreen() {
     setExpoUrl(null);
     setPreviewReady(false);
     setActiveWorkspaceTab('preview');
+    setActiveMobileTab('chat');
     setShowQr(false);
     setPreviewReloadKey(0);
     if (sid) {
@@ -255,6 +258,7 @@ export default function HomeScreen() {
         '```',
       ].join('\n')
     );
+    setActiveMobileTab('chat');
     setActiveWorkspaceTab('preview');
   }, []);
 
@@ -284,6 +288,287 @@ export default function HomeScreen() {
   const statusErrorBorder = isDark ? '#5c262d' : '#ffc9c9';
   const statusErrorIconBg = isDark ? '#3b2024' : '#ffe3e3';
 
+  const renderChatPane = () => (
+    <KeyboardAvoidingView
+      style={styles.flex}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}>
+      {hasMessages ? (
+        <ScrollView
+          style={styles.flex}
+          contentContainerStyle={styles.messagesContent}
+          showsVerticalScrollIndicator={false}>
+          {messages.map((m) => {
+            if (m.role === 'system') {
+              if (m.text.trim().length === 0) return null;
+              const statusIconName = m.error
+                ? 'alert-circle-outline'
+                : m.statusKind === 'thinking'
+                  ? 'sparkles-outline'
+                  : m.statusKind === 'file'
+                    ? 'document-attach-outline'
+                    : 'terminal-outline';
+              const statusTone = m.error ? errorColor : statusAccent;
+              const statusTextColor = m.error ? errorColor : mutedText;
+              return (
+                <View key={m.id} style={styles.systemRow}>
+                  <View
+                    style={[
+                      styles.systemPill,
+                      {
+                        backgroundColor: m.error ? statusErrorBg : statusBg,
+                        borderColor: m.error ? statusErrorBorder : statusBorder,
+                      },
+                    ]}>
+                    <View
+                      style={[
+                        styles.systemIcon,
+                        { backgroundColor: m.error ? statusErrorIconBg : statusIconBg },
+                      ]}>
+                      <Ionicons name={statusIconName} size={13} color={statusTone} />
+                    </View>
+                    <ThemedText style={[styles.systemText, { color: statusTextColor }]}>
+                      {m.text}
+                    </ThemedText>
+                  </View>
+                </View>
+              );
+            }
+
+            const isUser = m.role === 'user';
+            if (!isUser && m.text.length === 0) return null;
+            return (
+              <View
+                key={m.id}
+                style={[
+                  styles.bubbleRow,
+                  isUser ? styles.bubbleRowEnd : styles.bubbleRowStart,
+                ]}>
+                <View
+                  style={[
+                    styles.bubble,
+                    isUser
+                      ? { backgroundColor: userBubble, borderBottomRightRadius: 4 }
+                      : {
+                          backgroundColor: assistantBubble,
+                          borderBottomLeftRadius: 4,
+                        },
+                  ]}>
+                  <ThemedText
+                    style={[
+                      isUser ? { color: '#fff' } : undefined,
+                      !isUser && m.error ? { color: errorColor } : undefined,
+                      !isUser ? styles.assistantText : undefined,
+                    ]}>
+                    {m.text}
+                  </ThemedText>
+                </View>
+              </View>
+            );
+          })}
+        </ScrollView>
+      ) : (
+        <ScrollView
+          contentContainerStyle={styles.heroContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
+          <View style={styles.hero}>
+            <ThemedText style={styles.heroTitle}>What do you want to build?</ThemedText>
+            <ThemedText style={[styles.heroSubtitle, { color: mutedText }]}>
+              Describe an app or screen and we&apos;ll build it inside an E2B sandbox.
+            </ThemedText>
+          </View>
+
+          <View style={styles.suggestions}>
+            {SUGGESTIONS.map((s) => (
+              <Pressable
+                key={s}
+                onPress={() => send(s)}
+                disabled={inFlight}
+                style={({ pressed }) => [
+                  styles.chip,
+                  {
+                    backgroundColor: chipBg,
+                    borderColor: subtleBorder,
+                    opacity: pressed || inFlight ? 0.7 : 1,
+                  },
+                ]}>
+                <Ionicons name="sparkles-outline" size={14} color={mutedText} />
+                <ThemedText style={[styles.chipText, { color: palette.text }]}>{s}</ThemedText>
+              </Pressable>
+            ))}
+          </View>
+        </ScrollView>
+      )}
+
+      <View style={[styles.inputWrap, { borderTopColor: subtleBorder }]}>
+        <View
+          style={[
+            styles.inputBar,
+            { backgroundColor: inputBg, borderColor: subtleBorder },
+          ]}>
+          <TextInput
+            value={input}
+            onChangeText={setInput}
+            placeholder="Ask Expo Vibe to build something…"
+            placeholderTextColor={mutedText}
+            multiline
+            editable={!inFlight}
+            style={[styles.input, { color: palette.text }]}
+            onSubmitEditing={() => send(input)}
+            blurOnSubmit={false}
+          />
+          <View style={styles.inputControls}>
+            <Pressable hitSlop={8} style={styles.iconBtn} onPress={() => {}}>
+              <Ionicons name="add" size={20} color={mutedText} />
+            </Pressable>
+            <Pressable
+              disabled={!canSend}
+              onPress={() => send(input)}
+              style={({ pressed }) => [
+                styles.sendBtn,
+                {
+                  backgroundColor: canSend ? palette.tint : subtleBorder,
+                  opacity: pressed ? 0.8 : 1,
+                },
+              ]}>
+              {inFlight ? (
+                <ActivityIndicator size="small" color={mutedText} />
+              ) : (
+                <Ionicons
+                  name="arrow-up"
+                  size={18}
+                  color={canSend ? (isDark ? '#151718' : '#fff') : mutedText}
+                />
+              )}
+            </Pressable>
+          </View>
+        </View>
+        <ThemedText style={[styles.disclaimer, { color: mutedText }]}>
+          Expo Vibe runs on E2B. Review generated code before shipping.
+        </ThemedText>
+      </View>
+    </KeyboardAvoidingView>
+  );
+
+  const renderMobileTabs = () => (
+    <View
+      style={[
+        styles.mobileTabs,
+        { backgroundColor: palette.background, borderBottomColor: subtleBorder },
+      ]}>
+      {(
+        [
+          { id: 'chat', label: 'Chat', icon: 'chatbubble-ellipses-outline' },
+          { id: 'preview', label: 'Preview', icon: 'phone-portrait-outline' },
+          { id: 'files', label: 'Files', icon: 'folder-open-outline' },
+          { id: 'logs', label: 'Logs', icon: 'terminal-outline' },
+        ] as const
+      ).map((tab) => {
+        const selected = activeMobileTab === tab.id;
+        return (
+          <Pressable
+            key={tab.id}
+            onPress={() => setActiveMobileTab(tab.id)}
+            style={({ pressed }) => [
+              styles.mobileTab,
+              {
+                backgroundColor: selected ? workspaceTabBg : 'transparent',
+                opacity: pressed ? 0.75 : 1,
+              },
+            ]}>
+            <Ionicons name={tab.icon} size={15} color={selected ? palette.tint : mutedText} />
+            <ThemedText
+              numberOfLines={1}
+              style={[styles.mobileTabText, { color: selected ? palette.text : mutedText }]}>
+              {tab.label}
+            </ThemedText>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+
+  const renderPreviewContent = () => (
+    <View style={[styles.previewContent, { backgroundColor: workspaceBg }]}>
+      {expoUrl ? (
+        <View
+          style={[
+            styles.previewToolbar,
+            { backgroundColor: workspaceBg, borderBottomColor: subtleBorder },
+          ]}>
+          <View
+            style={[
+              styles.previewUrlPill,
+              { backgroundColor: inputBg, borderColor: subtleBorder },
+            ]}>
+            <Ionicons name="link-outline" size={14} color={mutedText} />
+            <ThemedText numberOfLines={1} style={[styles.previewUrlText, { color: mutedText }]}>
+              {expoUrl}
+            </ThemedText>
+          </View>
+          <Pressable
+            onPress={reloadPreview}
+            style={({ pressed }) => [
+              styles.previewAction,
+              { borderColor: subtleBorder, opacity: pressed ? 0.75 : 1 },
+            ]}>
+            <Ionicons name="refresh-outline" size={14} color={palette.text} />
+            <ThemedText style={[styles.previewActionText, { color: palette.text }]}>
+              Reload
+            </ThemedText>
+          </Pressable>
+          <Pressable
+            onPress={openPreviewUrl}
+            style={({ pressed }) => [
+              styles.previewAction,
+              { borderColor: subtleBorder, opacity: pressed ? 0.75 : 1 },
+            ]}>
+            <Ionicons name="open-outline" size={14} color={palette.text} />
+            <ThemedText style={[styles.previewActionText, { color: palette.text }]}>
+              Open
+            </ThemedText>
+          </Pressable>
+          <Pressable
+            onPress={() => setShowQr(true)}
+            style={({ pressed }) => [
+              styles.previewAction,
+              { borderColor: subtleBorder, opacity: pressed ? 0.75 : 1 },
+            ]}>
+            <Ionicons name="qr-code-outline" size={14} color={palette.text} />
+            <ThemedText style={[styles.previewActionText, { color: palette.text }]}>
+              Expo Go
+            </ThemedText>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {previewReady && expoUrl ? (
+        <SandboxPreview key={`${expoUrl}-${previewReloadKey}`} url={expoUrl} />
+      ) : !expoUrl && !sessionId ? (
+        <View style={styles.previewPending}>
+          <Ionicons name="phone-portrait-outline" size={28} color={mutedText} />
+          <ThemedText style={[styles.previewPendingText, { color: mutedText }]}>
+            Run a build to start a preview.
+          </ThemedText>
+        </View>
+      ) : (
+        <View style={styles.previewPending}>
+          <ActivityIndicator size="small" color={palette.tint} />
+          <ThemedText style={[styles.previewPendingText, { color: mutedText }]}>
+            Preview will appear when the build finishes.
+          </ThemedText>
+        </View>
+      )}
+    </View>
+  );
+
+  const renderWorkspaceContent = (tab: WorkspaceTab) => {
+    if (tab === 'preview') return renderPreviewContent();
+    if (tab === 'files') return <FileExplorer sessionId={sessionId} />;
+    return <ExpoLogs sessionId={sessionId} onPasteToChat={pasteLogsToChat} />;
+  };
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: palette.background }]} edges={['top']}>
       <View style={[styles.header, { borderBottomColor: subtleBorder }]}>
@@ -312,7 +597,9 @@ export default function HomeScreen() {
       </View>
 
       <View style={[styles.body, isWide ? styles.bodyRow : styles.bodyColumn]}>
-        <KeyboardAvoidingView
+        {isWide ? (
+          <>
+            <KeyboardAvoidingView
           style={styles.flex}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}>
@@ -477,7 +764,7 @@ export default function HomeScreen() {
             style={[
               styles.previewPane,
               { borderColor: subtleBorder },
-              isWide ? styles.previewPaneWide : styles.previewPaneNarrow,
+              styles.previewPaneWide,
             ]}>
             <View
               style={[
@@ -594,6 +881,17 @@ export default function HomeScreen() {
             )}
           </View>
         ) : null}
+          </>
+        ) : (
+          <View style={styles.mobileShell}>
+            {renderMobileTabs()}
+            <View style={styles.mobileTabContent}>
+              {activeMobileTab === 'chat'
+                ? renderChatPane()
+                : renderWorkspaceContent(activeMobileTab)}
+            </View>
+          </View>
+        )}
       </View>
 
       <Modal
@@ -659,6 +957,41 @@ const styles = StyleSheet.create({
   body: { flex: 1, minHeight: 0, minWidth: 0 },
   bodyRow: { flexDirection: 'row' },
   bodyColumn: { flexDirection: 'column' },
+  mobileShell: {
+    flex: 1,
+    minHeight: 0,
+    minWidth: 0,
+  },
+  mobileTabContent: {
+    flex: 1,
+    minHeight: 0,
+    minWidth: 0,
+  },
+  mobileTabs: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  mobileTab: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    paddingVertical: 8,
+  },
+  mobileTabText: {
+    minWidth: 0,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '700',
+  },
   previewPane: {
     minHeight: 0,
     minWidth: 0,
@@ -802,13 +1135,6 @@ const styles = StyleSheet.create({
   previewPaneWide: {
     flex: 1,
     borderLeftWidth: StyleSheet.hairlineWidth,
-  },
-  previewPaneNarrow: {
-    // Narrow layouts (phones) stack chat above preview. Give the preview
-    // less space than the chat so the streamed tool-call history stays
-    // visible without scrolling — chat: flex 1, preview: flex 0.6 ≈ 62/38.
-    flex: 0.6,
-    borderTopWidth: StyleSheet.hairlineWidth,
   },
   header: {
     flexDirection: 'row',
