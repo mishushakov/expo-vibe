@@ -2,6 +2,8 @@
 
 Expo Vibe is a web and native Expo app for generating Expo applications through a chat interface. Each chat spins up an E2B sandbox from the `expo-vibe` template, asks `opencode` to edit the sandboxed Expo project, and shows the generated app in a live preview.
 
+https://github.com/user-attachments/assets/fb20e06b-c17a-428b-a0b4-93a7d088a192
+
 ## What It Does
 
 - Chat with an AI coding agent to build or revise an Expo app.
