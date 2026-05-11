@@ -1,66 +1,119 @@
-# Welcome to your Expo app 👋
+# Expo Vibe
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Expo Vibe is a web and native Expo app for generating Expo applications through a chat interface. Each chat spins up an E2B sandbox from the `expo-vibe` template, asks `opencode` to edit the sandboxed Expo project, and shows the generated app in a live preview.
 
-## Get started
+## What It Does
 
-1. Install dependencies
+- Chat with an AI coding agent to build or revise an Expo app.
+- Keep multiple chat sessions, each backed by its own sandbox and generated app.
+- Stream assistant text, tool activity, errors, and completion events into the chat.
+- Preview the sandboxed Expo dev server in an iframe on web or a WebView on native.
+- Browse generated files under `/home/user/app`.
+- Inspect Expo logs from `/tmp/expo-vibe/expo.log` and paste them back into chat for fixes.
+- Open the preview externally, reload it, or show an Expo Go QR code.
+- Push the generated app to GitHub from inside the sandbox when `GH_TOKEN` is configured.
+- Toggle light and dark mode.
 
-   ```bash
-   npm install
-   ```
+## Tech Stack
 
-2. Configure environment variables
+- Expo 54 with Expo Router and React Native 0.81
+- React 19 and TypeScript
+- E2B sandboxes for isolated app generation
+- `opencode` CLI inside each sandbox
+- Expo Router API routes for server-side build/session endpoints
 
-   ```bash
-   cp .env.example .env
-   # then fill in E2B_API_KEY and OPENAI_API_KEY
-   ```
+## Setup
 
-   - `E2B_API_KEY` — get one at https://e2b.dev
-   - `OPENAI_API_KEY` — used by `opencode` running inside the sandbox
-   - `OPENCODE_MODEL` — optional, defaults to `openai/gpt-5.5`
-   - `GH_TOKEN` — optional, used by `gh` inside the sandbox when publishing apps to GitHub
-
-   Keys are server-side only (consumed by `app/api/build+api.ts`); do **not** prefix them with `EXPO_PUBLIC_`.
-
-3. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-   The chat UI calls `POST /api/build`, which spins up an E2B `opencode` sandbox, starts `opencode serve` on port 4096, and talks to it through the [`@opencode-ai/sdk`](https://opencode.ai/docs/sdk/) over the sandbox's public host (`Sandbox.getHost(4096)`). Each opencode SSE event (text part, tool call, etc.) is forwarded as NDJSON and rendered as a discrete chat message. Subsequent prompts in the same chat reuse the sandbox + opencode session.
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+Install dependencies:
 
 ```bash
-npm run reset-project
+npm install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Create a local environment file:
 
-## Learn more
+```bash
+cp .env.example .env
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+Configure these server-side variables:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```bash
+E2B_API_KEY=
+OPENAI_API_KEY=
+OPENCODE_MODEL=openai/gpt-5
+GH_TOKEN=
+```
 
-## Join the community
+`E2B_API_KEY` and `OPENAI_API_KEY` are required. `OPENCODE_MODEL` is optional; if unset, the API route falls back to `openai/gpt-5-mini`. `GH_TOKEN` is optional and is only needed for the GitHub sync action.
 
-Join our community of developers creating universal apps.
+Do not prefix these values with `EXPO_PUBLIC_`; they are consumed by server-side API routes.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+For native builds, the client usually infers the local API origin from Expo. If it cannot, set:
+
+```bash
+EXPO_PUBLIC_API_ORIGIN=http://<your-dev-server-host>:8081
+```
+
+## E2B Template
+
+The API route creates sandboxes from an E2B template named `expo-vibe`. Build or rebuild that template before running the app against real sandboxes:
+
+```bash
+npx tsx e2b/build.ts
+```
+
+The template:
+
+- Installs `opencode-ai` globally.
+- Scaffolds a fresh Expo app at `/home/user/app`.
+- Copies `e2b/AGENTS.md` into the generated app as sandbox instructions.
+- Installs the GitHub CLI.
+- Starts Expo on port `8081`.
+- Captures Expo output in `/tmp/expo-vibe/expo.log`.
+
+## Running Locally
+
+Start Expo:
+
+```bash
+npm run web
+```
+
+You can also use:
+
+```bash
+npm start
+npm run ios
+npm run android
+```
+
+The app exposes these API routes through Expo Router:
+
+- `POST /api/build` starts or continues an `opencode run` in a sandbox and streams NDJSON events.
+- `GET /api/session/[id]` lists files, reads text files, or returns Expo logs for a sandbox session.
+- `DELETE /api/session/[id]` kills a sandbox and removes its in-memory session state.
+
+Session state is stored in memory on the local Node process, so restarting the dev server drops tracked sessions.
+
+## Project Map
+
+- `app/index.tsx` - main chat, session list, preview, file, and log UI.
+- `app/api/build+api.ts` - creates/reuses E2B sandboxes and streams `opencode` events.
+- `app/api/session/[id]+api.ts` - sandbox file browser, text file preview, log reader, and cleanup.
+- `lib/build-client.ts` - client helpers for build streaming and session APIs.
+- `components/sandbox-preview.tsx` - iframe/WebView preview wrapper.
+- `components/file-explorer.tsx` - sandbox file browser and text preview.
+- `components/expo-logs.tsx` - Expo log viewer with paste-to-chat support.
+- `e2b/template.ts` - E2B template definition.
+- `e2b/AGENTS.md` - instructions given to `opencode` inside generated apps.
+
+## Available Scripts
+
+```bash
+npm start       # expo start
+npm run web     # expo start --web
+npm run ios     # expo start --ios
+npm run android # expo start --android
+npm run lint    # expo lint
+```
