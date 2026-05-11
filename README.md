@@ -61,7 +61,7 @@ EXPO_PUBLIC_API_ORIGIN=http://<your-dev-server-host>:8081
 The API route creates sandboxes from an E2B template named `expo-vibe`. Build or rebuild that template before running the app against real sandboxes:
 
 ```bash
-npx tsx e2b/build.ts
+npm run build:e2b
 ```
 
 The template:
@@ -112,9 +112,10 @@ Session state is stored in memory on the local Node process, so restarting the d
 ## Available Scripts
 
 ```bash
-npm start       # expo start
-npm run web     # expo start --web
-npm run ios     # expo start --ios
-npm run android # expo start --android
-npm run lint    # expo lint
+npm start          # expo start
+npm run web        # expo start --web
+npm run ios        # expo start --ios
+npm run android    # expo start --android
+npm run build:e2b  # build the E2B sandbox template
+npm run lint       # expo lint
 ```

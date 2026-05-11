@@ -8,6 +8,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "build:e2b": "npx tsx e2b/build.ts",
     "lint": "expo lint"
   },
   "dependencies": {
