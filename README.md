@@ -1,6 +1,6 @@
 # Expo Vibe
 
-Expo Vibe is a web and native Expo app for generating Expo applications through a chat interface. Each chat spins up an E2B sandbox from the `expo-vibe` template, asks `opencode` to edit the sandboxed Expo project, and shows the generated app in a live preview.
+Expo Vibe is a web and native Expo app for generating Expo applications through a chat interface. Each chat spins up an [E2B](https://e2b.dev) sandbox from the `expo-vibe` template, asks [OpenCode](https://opencode.ai) to edit the sandboxed Expo project, and shows the generated app in a live preview.
 
 https://github.com/user-attachments/assets/fb20e06b-c17a-428b-a0b4-93a7d088a192
 
@@ -18,11 +18,10 @@ https://github.com/user-attachments/assets/fb20e06b-c17a-428b-a0b4-93a7d088a192
 
 ## Tech Stack
 
-- Expo 54 with Expo Router and React Native 0.81
+- [Expo 54](https://expo.dev) with [Expo Router](https://expo.dev/router)
 - React 19 and TypeScript
-- E2B sandboxes for isolated app generation
-- `opencode` CLI inside each sandbox
-- Expo Router API routes for server-side build/session endpoints
+- [E2B](https://e2b.dev) sandboxes for isolated app generation
+- [OpenCode](https://opencode.ai) CLI inside each sandbox
 
 ## Setup
 
@@ -92,7 +91,7 @@ npm run android
 
 The app exposes these API routes through Expo Router:
 
-- `POST /api/build` starts or continues an `opencode run` in a sandbox and streams NDJSON events.
+- `POST /api/build` starts or continues an OpenCode session in a sandbox and streams NDJSON events.
 - `GET /api/session/[id]` lists files, reads text files, or returns Expo logs for a sandbox session.
 - `DELETE /api/session/[id]` kills a sandbox and removes its in-memory session state.
 
@@ -101,14 +100,14 @@ Session state is stored in memory on the local Node process, so restarting the d
 ## Project Map
 
 - `app/index.tsx` - main chat, session list, preview, file, and log UI.
-- `app/api/build+api.ts` - creates/reuses E2B sandboxes and streams `opencode` events.
+- `app/api/build+api.ts` - creates/reuses E2B sandboxes and streams OpenCode events.
 - `app/api/session/[id]+api.ts` - sandbox file browser, text file preview, log reader, and cleanup.
 - `lib/build-client.ts` - client helpers for build streaming and session APIs.
 - `components/sandbox-preview.tsx` - iframe/WebView preview wrapper.
 - `components/file-explorer.tsx` - sandbox file browser and text preview.
 - `components/expo-logs.tsx` - Expo log viewer with paste-to-chat support.
 - `e2b/template.ts` - E2B template definition.
-- `e2b/AGENTS.md` - instructions given to `opencode` inside generated apps.
+- `e2b/AGENTS.md` - instructions given to OpenCode inside generated apps.
 
 ## Available Scripts
 
