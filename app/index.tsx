@@ -742,7 +742,7 @@ export default function HomeScreen() {
       ]}>
       <View style={[styles.sessionPaneHeader, { borderBottomColor: subtleBorder }]}>
         <ThemedText type="defaultSemiBold" style={styles.sessionPaneTitle}>
-          Expo Vibes
+          Expo Vibe
         </ThemedText>
       </View>
       <View style={[styles.sessionPaneActions, { borderBottomColor: subtleBorder }]}>
@@ -948,7 +948,7 @@ export default function HomeScreen() {
                 Expo
               </ThemedText>
               <ThemedText style={[styles.heroWordmarkText, { color: palette.tint }]}>
-                Vibes
+                Vibe
               </ThemedText>
             </View>
             <ThemedText style={[styles.heroTitle, { color: palette.text }]}>
@@ -1111,7 +1111,7 @@ export default function HomeScreen() {
       <Pressable
         onPress={openMobileSessions}
         hitSlop={8}
-        accessibilityLabel="Open vibes"
+        accessibilityLabel="Open chats"
         accessibilityRole="button"
         style={({ pressed }) => [
           styles.iconBtn,
@@ -1122,7 +1122,7 @@ export default function HomeScreen() {
       </Pressable>
       <View pointerEvents="none" style={[styles.mobileTopTitleWrap, { top: mobileTopInset }]}>
         <ThemedText type="defaultSemiBold" numberOfLines={1} style={styles.mobileTopTitle}>
-          Expo Vibes
+          Expo Vibe
         </ThemedText>
       </View>
       <View style={styles.mobileTopActions}>
